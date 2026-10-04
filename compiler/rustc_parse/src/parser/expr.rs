@@ -1134,6 +1134,21 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parses a record argument, `_ { x: 1 }`, after the `_` at `lo`. It becomes the struct
+    /// expression `<_>::_ { x: 1 }`, whose struct is inferred by type checking.
+    fn parse_expr_inferred_struct(&mut self, lo: Span) -> PResult<'a, Box<Expr>> {
+        self.bump(); // `{`
+        let qself = Box::new(ast::QSelf {
+            ty: self.mk_ty(lo, TyKind::Infer),
+            path_span: lo.shrink_to_lo(),
+            position: 0,
+        });
+        let path = Path::from_ident(Ident::new(kw::Underscore, lo));
+        let expr = self.parse_expr_struct(Some(qself), path, true)?;
+        self.psess.gated_spans.gate(sym::struct_args, expr.span);
+        Ok(expr)
+    }
+
     fn recover_raw_ref_call_args(&mut self, guar: ErrorGuaranteed) -> ThinVec<Box<Expr>> {
         let err_span = self.prev_token.span.to(self.token.span);
         let mut args = thin_vec![self.mk_expr_err(err_span, guar)];
@@ -1354,7 +1369,7 @@ impl<'a> Parser<'a> {
             } else if this.check(exp!(OpenParen)) {
                 this.parse_expr_tuple_parens(restrictions)
             } else if this.check(exp!(OpenBrace)) {
-                if let Some(expr) = this.maybe_recover_bad_struct_literal_path(false)? {
+                if let Some(expr) = this.maybe_recover_bad_struct_literal_path()? {
                     return Ok(expr);
                 }
                 if let Some(arr) = this.recover_from_c_array(lo) {
@@ -1436,8 +1451,10 @@ impl<'a> Parser<'a> {
             } else if this.check_keyword(exp!(Let)) {
                 this.parse_expr_let(restrictions)
             } else if this.eat_keyword(exp!(Underscore)) {
-                if let Some(expr) = this.maybe_recover_bad_struct_literal_path(true)? {
-                    return Ok(expr);
+                if this.token == token::OpenBrace
+                    && !this.restrictions.contains(Restrictions::NO_STRUCT_LITERAL)
+                {
+                    return this.parse_expr_inferred_struct(this.prev_token.span);
                 }
                 Ok(this.mk_expr(this.prev_token.span, ExprKind::Underscore))
             } else if this.token_uninterpolated_span().at_least_rust_2018() {
@@ -3634,21 +3651,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn maybe_recover_bad_struct_literal_path(
-        &mut self,
-        is_underscore_entry_point: bool,
-    ) -> PResult<'a, Option<Box<Expr>>> {
+    fn maybe_recover_bad_struct_literal_path(&mut self) -> PResult<'a, Option<Box<Expr>>> {
         if self.may_recover()
             && self.check_noexpect(&token::OpenBrace)
             && (!self.restrictions.contains(Restrictions::NO_STRUCT_LITERAL)
                 && self.is_likely_struct_lit())
         {
-            let span = if is_underscore_entry_point {
-                self.prev_token.span
-            } else {
-                self.token.span.shrink_to_lo()
-            };
-
+            let span = self.token.span.shrink_to_lo();
             self.bump(); // {
             let expr = self.parse_expr_struct(
                 None,
@@ -3656,14 +3665,10 @@ impl<'a> Parser<'a> {
                 false,
             )?;
 
-            let guar = if is_underscore_entry_point {
-                self.dcx().emit_err(crate::diagnostics::StructLiteralPlaceholderPath { span })
-            } else {
-                self.dcx().emit_err(crate::diagnostics::StructLiteralWithoutPathLate {
-                    span: expr.span,
-                    suggestion_span: expr.span.shrink_to_lo(),
-                })
-            };
+            let guar = self.dcx().emit_err(crate::diagnostics::StructLiteralWithoutPathLate {
+                span: expr.span,
+                suggestion_span: expr.span.shrink_to_lo(),
+            });
 
             Ok(Some(self.mk_expr_err(expr.span, guar)))
         } else {

@@ -1,0 +1,8 @@
+error: unexpected token: `{`
+  --> $DIR/record-args-parse-errors.rs:5:17
+   |
+LL | type Ptr = fn(_ { x: u32 });
+   |                 ^ unexpected token after this
+
+error: aborting due to 1 previous error
+

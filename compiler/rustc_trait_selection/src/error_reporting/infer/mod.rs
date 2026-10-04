@@ -1207,8 +1207,14 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     //         ---  ^ type argument elided
                     //         |
                     //         highlighted in output
-                    values.0.push_normal(self.tcx.item_name(did1).to_string());
-                    values.1.push_normal(self.tcx.item_name(did2).to_string());
+                    // Records are anonymous, and print like closures.
+                    let name = if self.tcx.is_record(did1) {
+                        path1
+                    } else {
+                        self.tcx.item_name(did1).to_string()
+                    };
+                    values.0.push_normal(name.clone());
+                    values.1.push_normal(name);
 
                     // Avoid printing out default generic parameters that are common to both
                     // types.

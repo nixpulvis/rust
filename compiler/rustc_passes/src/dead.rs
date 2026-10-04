@@ -1133,7 +1133,10 @@ enum ReportOn {
 
 impl<'tcx> DeadVisitor<'tcx> {
     fn should_warn_about_field(&mut self, field: &ty::FieldDef) -> ShouldWarnAboutField {
-        if self.live_symbols.contains(&field.did.expect_local()) {
+        // A record's fields are its function's parameters, which bindings may well not use.
+        if self.live_symbols.contains(&field.did.expect_local())
+            || self.tcx.is_record(self.tcx.parent(field.did))
+        {
             return ShouldWarnAboutField::No;
         }
         let field_type = self.tcx.type_of(field.did).instantiate_identity().skip_norm_wip();
@@ -1433,7 +1436,10 @@ impl<'tcx> DeadVisitor<'tcx> {
             return true;
         };
 
-        self.live_symbols.contains(&def_id) || name.as_str().starts_with('_')
+        // A record is built by the calls to its function.
+        self.live_symbols.contains(&def_id)
+            || name.as_str().starts_with('_')
+            || self.tcx.is_record(def_id.to_def_id())
     }
 }
 

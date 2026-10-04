@@ -2002,10 +2002,12 @@ pub(crate) fn clean_ty<'tcx>(ty: &hir::Ty<'_>, cx: &mut DocContext<'tcx>) -> Typ
             clean_ty(ty, cx)
         }
         // Rustdoc handles `TyKind::Err`s by turning them into `Type::Infer`s.
+        // FIXME(struct_args): render the fields of a record parameter.
         TyKind::Infer(())
         | TyKind::Err(_)
         | TyKind::InferDelegation(..)
-        | TyKind::TraitAscription(_) => Infer,
+        | TyKind::TraitAscription(_)
+        | TyKind::Record(_) => Infer,
     }
 }
 

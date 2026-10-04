@@ -2298,6 +2298,16 @@ impl Rewrite for ast::Param {
             (mk_sp(self.span.lo(), self.span.lo()), false, false)
         };
 
+        // A record parameter (`#![feature(struct_args)]`), `_ { x: u32 }` or `p: _ { x: u32 }`,
+        // whose pattern the parser builds from its fields, is kept as written.
+        if let ast::TyKind::Record(..) = self.ty.kind {
+            let record = context.snippet(self.span);
+            return Ok(if param_attrs_result.is_empty() {
+                record.to_owned()
+            } else {
+                format!("{param_attrs_result} {record}")
+            });
+        }
         if let Some(ref explicit_self) = self.to_self() {
             rewrite_explicit_self(
                 context,

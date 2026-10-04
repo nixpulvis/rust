@@ -131,6 +131,13 @@ impl IntegerType {
 }
 
 impl<'tcx> TyCtxt<'tcx> {
+    /// Whether `def_id` is the anonymous struct of a parameter, a record
+    /// (`#![feature(struct_args)]`), whose parent is its function.
+    pub fn is_record(self, def_id: DefId) -> bool {
+        self.def_kind(def_id) == DefKind::Struct
+            && self.opt_item_name(def_id) == Some(sym::record_struct)
+    }
+
     /// Creates a hash of the type `Ty` which will be the same no matter what crate
     /// context it's calculated within. This is used by the `type_id` intrinsic.
     pub fn type_id_hash(self, ty: Ty<'tcx>) -> Hash128 {

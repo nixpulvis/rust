@@ -9,18 +9,6 @@ help: add the correct type
 LL |     let _ = /* Type */ {foo: (), bar: {} };
    |             ++++++++++
 
-error: placeholder `_` is not allowed for the path in struct literals
-  --> $DIR/struct-lit-placeholder-or-empty-path.rs:5:13
-   |
-LL |     let _ = _ {foo: (), bar: {} };
-   |             ^ not allowed in struct literals
-   |
-help: replace it with the correct type
-   |
-LL -     let _ = _ {foo: (), bar: {} };
-LL +     let _ = /* Type */ {foo: (), bar: {} };
-   |
-
 error: struct literal body without path
   --> $DIR/struct-lit-placeholder-or-empty-path.rs:8:13
    |
@@ -32,17 +20,24 @@ help: add the correct type
 LL |     let _ = /* Type */ {foo: ()};
    |             ++++++++++
 
-error: placeholder `_` is not allowed for the path in struct literals
+error[E0658]: record parameters and arguments are experimental
+  --> $DIR/struct-lit-placeholder-or-empty-path.rs:5:13
+   |
+LL |     let _ = _ {foo: (), bar: {} };
+   |             ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: add `#![feature(struct_args)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error[E0658]: record parameters and arguments are experimental
   --> $DIR/struct-lit-placeholder-or-empty-path.rs:11:13
    |
 LL |     let _ = _ {foo: ()};
-   |             ^ not allowed in struct literals
+   |             ^^^^^^^^^^^
    |
-help: replace it with the correct type
-   |
-LL -     let _ = _ {foo: ()};
-LL +     let _ = /* Type */ {foo: ()};
-   |
+   = help: add `#![feature(struct_args)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
 
 error: aborting due to 4 previous errors
 
+For more information about this error, try `rustc --explain E0658`.

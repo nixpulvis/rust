@@ -2230,6 +2230,18 @@ impl<'tcx> Printer<'tcx> for FmtPrinter<'_, 'tcx> {
         def_id: DefId,
         args: &'tcx [GenericArg<'tcx>],
     ) -> Result<(), PrintError> {
+        // Records are anonymous structs, printed like closures.
+        if def_id.is_local()
+            && !self.should_print_verbose()
+            && !self.tcx.sess.opts.unstable_opts.span_free_formats
+            && !with_reduced_queries()
+            && self.tcx.is_record(def_id)
+        {
+            write!(self, "{{record")?;
+            self.pretty_print_closure_inner(def_id, self.tcx.mk_args(args))?;
+            return write!(self, "}}");
+        }
+
         if args.is_empty() {
             match self.try_print_trimmed_def_path(def_id)? {
                 true => return Ok(()),

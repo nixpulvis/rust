@@ -491,6 +491,8 @@ impl<'a> State<'a> {
                 }
                 self.word("})");
             }
+            // The fields are those of the record's item, which is printed on its own.
+            hir::TyKind::Record(_) => self.word("_ { .. }"),
         }
         self.end(ib)
     }

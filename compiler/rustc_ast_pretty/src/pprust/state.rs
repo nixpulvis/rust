@@ -1466,8 +1466,74 @@ impl<'a> State<'a> {
                 self.print_expr(expr, FixupContext::default());
                 self.pclose();
             }
+            ast::TyKind::Record(record) => self.print_record(record, &[]),
         }
         self.end(ib);
+    }
+
+    /// Prints the anonymous struct of a record parameter, `_ { x: u32, mut y: u32 = 0 }`, whose
+    /// fields named in `mutable` are bound mutably.
+    fn print_record(&mut self, record: &ast::RecordTy, mutable: &[Ident]) {
+        self.word("_");
+        self.nbsp();
+        self.word("{");
+        if record.fields.is_empty() {
+            self.word("}");
+            return;
+        }
+        self.nbsp();
+        self.commasep(Inconsistent, &record.fields, |s, field| {
+            s.print_outer_attributes(&field.attrs);
+            if let Some(ident) = field.ident {
+                if mutable.contains(&ident) {
+                    s.word_nbsp("mut");
+                }
+                s.print_ident(ident);
+                s.word_nbsp(":");
+            }
+            s.print_type(&field.ty);
+            if let Some(default) = field.default_value() {
+                s.space();
+                s.word_space("=");
+                s.print_expr(&default.value, FixupContext::default());
+            }
+        });
+        self.nbsp();
+        self.word("}");
+    }
+
+    /// Prints a record parameter as written, `_ { x: u32 }` or `p: _ { x: u32 }`, rather than as
+    /// the pattern made from its fields and its type.
+    fn print_record_param(&mut self, pat: &ast::Pat, record: &ast::RecordTy) {
+        let fields_pat = match &pat.kind {
+            PatKind::Ident(BindingMode(by_ref, mutbl), ident, Some(sub)) => {
+                if mutbl.is_mut() {
+                    self.word_nbsp("mut");
+                }
+                if let ByRef::Yes(_, rmutbl) = by_ref {
+                    self.word_nbsp("ref");
+                    if rmutbl.is_mut() {
+                        self.word_nbsp("mut");
+                    }
+                }
+                self.print_ident(*ident);
+                self.word(":");
+                self.space();
+                sub
+            }
+            _ => pat,
+        };
+        let mutable: Vec<_> = match &fields_pat.kind {
+            PatKind::Struct(_, _, fields, _) => fields
+                .iter()
+                .filter(|f| {
+                    matches!(f.pat.kind, PatKind::Ident(BindingMode(_, ast::Mutability::Mut), ..))
+                })
+                .map(|f| f.ident)
+                .collect(),
+            _ => Vec::new(),
+        };
+        self.print_record(record, &mutable);
     }
 
     fn print_trait_ref(&mut self, t: &ast::TraitRef) {
@@ -2241,8 +2307,9 @@ impl<'a> State<'a> {
 
         self.print_outer_attributes_inline(&input.attrs);
 
-        match input.ty.kind {
+        match &input.ty.kind {
             ast::TyKind::Infer if is_closure => self.print_pat(&input.pat),
+            ast::TyKind::Record(record) => self.print_record_param(&input.pat, record),
             _ => {
                 if let Some(eself) = input.to_self() {
                     self.print_explicit_self(&eself);

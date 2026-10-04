@@ -412,6 +412,7 @@ impl<'v> hir_visit::Visitor<'v> for StatCollector<'v> {
                 Pat,
                 FieldOf,
                 View,
+                Record,
                 Err
             ]
         );
@@ -700,6 +701,7 @@ impl<'v> ast_visit::Visitor<'v> for StatCollector<'v> {
                 FieldOf,
                 View,
                 GcaMacro,
+                Record,
                 Dummy,
                 Err
             ]

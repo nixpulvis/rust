@@ -304,7 +304,7 @@ impl<'a> Parser<'a> {
             self.parse_static_item(safety, mutability)?
         } else if self.check_keyword_case(exp!(Trait), case) || self.check_trait_front_matter() {
             // TRAIT ITEM
-            self.parse_item_trait(attrs, lo)?
+            self.parse_item_trait(attrs, lo, vis)?
         } else if self.check_impl_frontmatter(0) {
             // IMPL ITEM
             self.parse_item_impl(attrs, def_(), false)?
@@ -1163,7 +1163,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses `[impl(in? path)]? const? unsafe? auto? trait Foo { ... }` or `trait Foo = Bar;`.
-    fn parse_item_trait(&mut self, attrs: &mut AttrVec, lo: Span) -> PResult<'a, ItemKind> {
+    fn parse_item_trait(
+        &mut self,
+        attrs: &mut AttrVec,
+        lo: Span,
+        vis: &Visibility,
+    ) -> PResult<'a, ItemKind> {
         let impl_restriction = self.parse_impl_restriction()?;
         let constness = self.parse_constness(Case::Sensitive);
         if let Const::Yes(span) = constness {
@@ -1217,7 +1222,14 @@ impl<'a> Parser<'a> {
         } else {
             // It's a normal trait.
             generics.where_clause = self.parse_where_clause()?;
-            let items = self.parse_item_list(attrs, |p| p.parse_trait_item(ForceCollect::No))?;
+            let mut items =
+                self.parse_item_list(attrs, |p| p.parse_trait_item(ForceCollect::No))?;
+            // The records of trait methods take the trait's visibility.
+            for item in &mut items {
+                if let AssocItemKind::Fn(f) = &mut item.kind {
+                    Self::set_record_visibility(&mut f.sig.decl, vis);
+                }
+            }
             Ok(ItemKind::Trait(Box::new(Trait {
                 impl_restriction,
                 constness,
@@ -2151,11 +2163,24 @@ impl<'a> Parser<'a> {
         ident_span: Span,
         parsed_where: bool,
     ) -> PResult<'a, (ThinVec<FieldDef>, Recovered)> {
+        self.parse_record_fields(adt_ty, ident_span, parsed_where, None)
+    }
+
+    /// Parses the fields of a record struct or, when `bindings` is given, of a record
+    /// parameter, whose fields may start with `mut` to bind them mutably. `bindings` receives
+    /// the mutability of each parsed field.
+    pub(super) fn parse_record_fields(
+        &mut self,
+        adt_ty: &str,
+        ident_span: Span,
+        parsed_where: bool,
+        mut bindings: Option<&mut ThinVec<Mutability>>,
+    ) -> PResult<'a, (ThinVec<FieldDef>, Recovered)> {
         let mut fields = ThinVec::new();
         let mut recovered = Recovered::No;
         if self.eat(exp!(OpenBrace)) {
             while self.token != token::CloseBrace {
-                match self.parse_field_def(adt_ty, ident_span) {
+                match self.parse_field_def(adt_ty, ident_span, bindings.as_deref_mut()) {
                     Ok(field) => {
                         fields.push(field);
                     }
@@ -2305,13 +2330,29 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses an element of a struct declaration.
-    fn parse_field_def(&mut self, adt_ty: &str, ident_span: Span) -> PResult<'a, FieldDef> {
+    fn parse_field_def(
+        &mut self,
+        adt_ty: &str,
+        ident_span: Span,
+        bindings: Option<&mut ThinVec<Mutability>>,
+    ) -> PResult<'a, FieldDef> {
         self.recover_vcs_conflict_marker();
         let attrs = self.parse_outer_attributes()?;
         self.recover_vcs_conflict_marker();
         self.collect_tokens(None, attrs, ForceCollect::No, |this, attrs| {
             let lo = this.token.span;
             let vis = this.parse_visibility(FollowedByType::No)?;
+            // In a record parameter, `mut` not followed by `(` is the field's binding mode, as
+            // in `fn f(mut x: u32)`, rather than a `mut(..)` restriction.
+            let binding = if bindings.is_some()
+                && this.token.is_keyword(kw::Mut)
+                && !this.look_ahead(1, |t| *t == token::OpenParen)
+            {
+                this.bump();
+                Mutability::Mut
+            } else {
+                Mutability::Not
+            };
             let mut_restriction = this.parse_mut_restriction()?;
             let safety = this.parse_unsafe_field();
             this.parse_single_struct_field(
@@ -2323,7 +2364,12 @@ impl<'a> Parser<'a> {
                 attrs,
                 ident_span,
             )
-            .map(|field| (field, Trailing::No, UsePreAttrPos::No))
+            .map(|field| {
+                if let Some(bindings) = bindings {
+                    bindings.push(binding);
+                }
+                (field, Trailing::No, UsePreAttrPos::No)
+            })
         })
     }
 

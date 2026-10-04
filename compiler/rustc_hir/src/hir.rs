@@ -3613,6 +3613,10 @@ pub enum TyKind<'hir, Unambig = ()> {
     FieldOf(&'hir Ty<'hir>, &'hir TyFieldPath),
     /// A view of a type. `T.{ field_1, field_2 }`.
     View(&'hir Ty<'hir>, &'hir [Ident]),
+    /// The anonymous struct of a parameter, `_ { x: u32 }` (`#![feature(struct_args)]`), an item of
+    /// its own whose generics are its function's. In a trait impl, the parameter's type is the
+    /// trait method's record instead, and the impl's record only lists its fields.
+    Record(ItemId),
     /// `TyKind::Infer` means the type should be inferred instead of it having been
     /// specified. This can appear anywhere in a type.
     ///

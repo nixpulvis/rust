@@ -1,5 +1,7 @@
+use std::mem;
+
 use rustc_abi::ExternAbi;
-use rustc_ast::visit::AssocCtxt;
+use rustc_ast::visit::{self, AssocCtxt, Visitor};
 use rustc_ast::*;
 use rustc_attr_ir::target::Target;
 use rustc_attr_ir::{AttributeKind, EiiImplResolution, find_attr};
@@ -20,7 +22,7 @@ use super::diagnostics::{
 use super::stability::{enabled_names, gate_unstable_abi};
 use super::{
     FnDeclKind, GenericArgsMode, ImplTraitContext, ImplTraitPosition, LoweringContext, ParamMode,
-    RelaxedBoundForbiddenReason, RelaxedBoundPolicy,
+    PerOwnerLoweringState, RelaxedBoundForbiddenReason, RelaxedBoundPolicy,
 };
 use crate::diagnostics::{ConstComptimeFn, ResolvingRestrictionKind, RestrictionAncestorOnly};
 
@@ -762,8 +764,13 @@ impl<'hir> LoweringContext<'_, 'hir> {
         &mut self,
         (index, f): (usize, &FieldDef),
     ) -> hir::FieldDef<'hir> {
-        let ty =
-            self.lower_ty_alloc(&f.ty, ImplTraitContext::Disallowed(ImplTraitPosition::FieldTy));
+        // `impl Trait` in a field of a record is a parameter of its function.
+        let itctx = if self.curr_owner.is_record {
+            ImplTraitContext::Universal
+        } else {
+            ImplTraitContext::Disallowed(ImplTraitPosition::FieldTy)
+        };
+        let ty = self.lower_ty_alloc(&f.ty, itctx);
         let hir_id = self.lower_node_id(f.id);
         self.lower_attrs(hir_id, &f.attrs, f.span, Target::Field);
         hir::FieldDef {
@@ -783,6 +790,59 @@ impl<'hir> LoweringContext<'_, 'hir> {
             ty,
             safety: self.lower_safety(f.safety(), hir::Safety::Safe),
         }
+    }
+
+    /// Lowers the anonymous struct of a parameter (see `TyKind::Record`) as an item of its own, a
+    /// child of the function being lowered, whose generics and resolutions it shares.
+    pub(super) fn lower_record(&mut self, record: &RecordTy) -> hir::ItemId {
+        let def_id = self.local_def_id(record.id);
+
+        // `impl Trait` in a field is a parameter of the function, so lower it, and its bounds,
+        // with the function. The record's field only names the parameter.
+        struct FindImplTrait<'a>(Vec<(NodeId, Span, &'a [GenericBound])>);
+        impl<'a> Visitor<'a> for FindImplTrait<'a> {
+            fn visit_ty(&mut self, ty: &'a Ty) {
+                match &ty.kind {
+                    TyKind::ImplTrait(id, bounds) => self.0.push((*id, ty.span, bounds)),
+                    _ => visit::walk_ty(self, ty),
+                }
+            }
+        }
+        let mut find = FindImplTrait(Vec::new());
+        for field in &record.fields {
+            find.visit_ty(&field.ty);
+        }
+        for (id, span, bounds) in find.0 {
+            let ident = Ident::new(self.tcx.item_name(self.local_def_id(id).to_def_id()), span);
+            let (param, preds) = self.lower_universal_param(id, span, ident, bounds);
+            self.curr_owner.impl_trait_defs.push(param);
+            self.curr_owner.impl_trait_bounds.extend(preds);
+        }
+
+        let mut state =
+            PerOwnerLoweringState::with_tables(self.resolver, self.curr_owner.owner, def_id);
+        state.is_record = true;
+        let fn_state = mem::replace(&mut self.curr_owner, state);
+        let fields = self
+            .arena
+            .alloc_from_iter(record.fields.iter().enumerate().map(|f| self.lower_field_def(f)));
+        let ident = Ident::new(sym::record_struct, self.lower_span(record.ident_span));
+        let span = record.fields.iter().fold(record.ident_span, |span, field| span.to(field.span));
+        let item = self.arena.alloc(hir::Item {
+            owner_id: hir::OwnerId { def_id },
+            kind: hir::ItemKind::Struct(
+                ident,
+                hir::Generics::empty(),
+                hir::VariantData::Struct { fields, recovered: record.recovered },
+            ),
+            span: self.lower_span(span),
+            vis_span: self.lower_span(record.vis.span),
+            eii: false,
+        });
+        let record_state = mem::replace(&mut self.curr_owner, fn_state);
+        let info = record_state.into_owner_info(self.tcx, hir::OwnerNode::Item(item));
+        self.curr_owner.children.insert(def_id, hir::MaybeOwner::Owner(info));
+        hir::ItemId { owner_id: hir::OwnerId { def_id } }
     }
 
     pub(super) fn lower_trait_item(&mut self, i: &AssocItem) -> &'hir hir::TraitItem<'hir> {

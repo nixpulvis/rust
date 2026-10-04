@@ -69,8 +69,78 @@ fn compare_impl_method<'tcx>(
     impl_trait_ref: ty::TraitRef<'tcx>,
 ) -> Result<(), ErrorGuaranteed> {
     check_method_is_structurally_compatible(tcx, impl_m, trait_m, impl_trait_ref, false)?;
+    let records = compare_record_params(tcx, impl_m, trait_m, impl_trait_ref);
     compare_method_clause_entailment(tcx, impl_m, trait_m, impl_trait_ref)?;
-    Ok(())
+    records
+}
+
+/// The record parameters of a trait impl's method (`#![feature(struct_args)]`) take the trait
+/// method's records (see `lower_record_param_ty`), and only repeat their fields. Checks that the
+/// repeated fields have the trait's types, ignoring lifetimes, which the parameter takes from the
+/// trait, and no defaults, which come from the trait. The pattern of the parameter checks the
+/// fields' names.
+fn compare_record_params<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    impl_m: ty::AssocItem,
+    trait_m: ty::AssocItem,
+    impl_trait_ref: ty::TraitRef<'tcx>,
+) -> Result<(), ErrorGuaranteed> {
+    let impl_m_def_id = impl_m.def_id.expect_local();
+    let Some(decl) = tcx.hir_fn_decl_by_hir_id(tcx.local_def_id_to_hir_id(impl_m_def_id)) else {
+        return Ok(());
+    };
+    if !decl.inputs.iter().any(|input| matches!(input.kind, hir::TyKind::Record(_))) {
+        return Ok(());
+    }
+    let trait_sig = tcx.fn_sig(trait_m.def_id).instantiate_identity().skip_norm_wip().skip_binder();
+    let trait_to_impl_args = GenericArgs::identity_for_item(tcx, impl_m.def_id).rebase_onto(
+        tcx,
+        impl_m.container_id(tcx),
+        impl_trait_ref.args,
+    );
+    let typing_env = ty::TypingEnv::non_body_analysis(tcx, impl_m.def_id);
+    let mut result = Ok(());
+    for (input, &trait_input) in iter::zip(decl.inputs, trait_sig.inputs()) {
+        let hir::TyKind::Record(item) = input.kind else { continue };
+        let ty::Adt(trait_record, _) = trait_input.kind() else { continue };
+        if !tcx.is_record(trait_record.did()) {
+            continue;
+        }
+        let hir::ItemKind::Struct(_, _, data) = tcx.hir_item(item).kind else { continue };
+        let trait_fields = &trait_record.non_enum_variant().fields;
+        for field in data.fields() {
+            if field.default.is_some() {
+                result = Err(tcx
+                    .dcx()
+                    .struct_span_err(field.span, "default values are not allowed in trait impls")
+                    .with_note("the defaults of a record parameter come from the trait")
+                    .emit_err());
+            }
+            let Some(trait_field) = trait_fields.iter().find(|f| f.name == field.ident.name) else {
+                continue;
+            };
+            let normalize = |ty| tcx.try_normalize_erasing_regions(typing_env, ty);
+            let (Ok(impl_ty), Ok(trait_ty)) = (
+                normalize(tcx.type_of(field.def_id).instantiate_identity()),
+                normalize(tcx.type_of(trait_field.did).instantiate(tcx, trait_to_impl_args)),
+            ) else {
+                continue;
+            };
+            if impl_ty != trait_ty && !(impl_ty, trait_ty).references_error() {
+                result = Err(struct_span_code_err!(
+                    tcx.dcx(),
+                    field.ty.span,
+                    E0053,
+                    "field `{}` of a record parameter has an incompatible type for trait",
+                    field.ident
+                )
+                .with_span_label(field.ty.span, format!("expected `{trait_ty}`, found `{impl_ty}`"))
+                .with_span_note(tcx.def_span(trait_field.did), "type in trait")
+                .emit_err());
+            }
+        }
+    }
+    result
 }
 
 /// Checks a bunch of different properties of the impl/trait methods for

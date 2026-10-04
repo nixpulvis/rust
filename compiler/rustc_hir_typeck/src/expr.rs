@@ -1812,8 +1812,18 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         fields: &'tcx [hir::ExprField<'tcx>],
         base_expr: &'tcx hir::StructTailExpr<'tcx>,
     ) -> Ty<'tcx> {
+        let is_inferred_path = matches!(
+            qpath,
+            QPath::TypeRelative(hir::Ty { kind: hir::TyKind::Infer(_), .. }, seg)
+                if seg.ident.name == kw::Underscore
+        );
         // Find the relevant variant
-        let (variant, adt_ty) = match self.check_struct_path(qpath, expr.hir_id) {
+        let path = if is_inferred_path {
+            self.check_inferred_struct_path(qpath.span(), expr.hir_id, expected)
+        } else {
+            self.check_struct_path(qpath, expr.hir_id)
+        };
+        let (variant, adt_ty) = match path {
             Ok(data) => data,
             Err(guar) => {
                 self.check_struct_fields_on_error(fields, base_expr);
@@ -1840,6 +1850,48 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         self.require_type_is_sized(adt_ty, expr.span, ObligationCauseCode::StructInitializerSized);
         adt_ty
+    }
+
+    /// Finds the struct of an inferred struct literal, `<_>::_ { .. }`, written `_ { .. }`
+    /// (`#![feature(struct_args)]`), from the expected type.
+    fn check_inferred_struct_path(
+        &self,
+        path_span: Span,
+        hir_id: HirId,
+        expected: Expectation<'tcx>,
+    ) -> Result<(&'tcx ty::VariantDef, Ty<'tcx>), ErrorGuaranteed> {
+        let Some(ty) = expected.only_has_type(self) else {
+            // As for the arguments of a callee with errors.
+            if let Some(guar) = self.tainted_by_errors() {
+                return Err(guar);
+            }
+            return Err(struct_span_code_err!(
+                self.dcx(),
+                path_span,
+                E0282,
+                "type annotations needed"
+            )
+            .with_span_label(path_span, "cannot infer type")
+            .emit_err());
+        };
+        let ty = self.structurally_resolve_type(path_span, ty);
+        match *ty.kind() {
+            ty::Adt(adt, _) if !adt.is_enum() => {
+                // For `qpath_res`.
+                self.write_resolution(hir_id, Ok((self.tcx.def_kind(adt.did()), adt.did())));
+                Ok((adt.non_enum_variant(), ty))
+            }
+            ty::Error(guar) => Err(guar),
+            _ => Err(struct_span_code_err!(
+                self.dcx(),
+                path_span,
+                E0071,
+                "expected struct, variant or union type, found {}",
+                ty.sort_string(self.tcx)
+            )
+            .with_span_label(path_span, "not a struct")
+            .emit_err()),
+        }
     }
 
     fn check_expr_struct_fields(

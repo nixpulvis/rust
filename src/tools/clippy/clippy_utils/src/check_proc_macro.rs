@@ -540,6 +540,7 @@ fn ast_ty_search_pat(ty: &ast::Ty) -> (Pat, Pat) {
         | TyKind::FieldOf(..)
         | TyKind::View(..)
         | TyKind::GcaMacro(..)
+        | TyKind::Record(..)
 
         // unused
         | TyKind::CVarArgs

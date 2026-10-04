@@ -3214,6 +3214,7 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                     self.lower_fn_ty(hir_ty.hir_id, bf.safety, bf.abi, bf.decl, None, Some(hir_ty)),
                 )
             }
+            hir::TyKind::Record(item) => self.lower_record_param_ty(*item),
             hir::TyKind::UnsafeBinder(binder) => Ty::new_unsafe_binder(
                 tcx,
                 ty::Binder::bind_with_vars(
@@ -3624,6 +3625,67 @@ impl<'tcx> dyn HirTyLowerer<'tcx> + '_ {
                 dcx.span_err(ty_span, format!("type `{ty}` is not yet supported in `field_of!`")),
             ),
         }
+    }
+
+    /// The type of a record parameter (`#![feature(struct_args)]`): the record, with its
+    /// function's own parameters, since its generics are its function's. In a trait impl, it's the
+    /// trait method's record at the same position, with the parameters the impl gives the trait
+    /// method. The impl's record only lists its fields, which `compare_impl_item` checks.
+    fn lower_record_param_ty(&self, item: hir::ItemId) -> Ty<'tcx> {
+        let tcx = self.tcx();
+        let record = item.owner_id.def_id;
+        let fn_def_id = tcx.local_parent(record);
+        if let Some(trait_m) = tcx.trait_item_of(fn_def_id)
+            && let Some(ty) = self.trait_record_ty(fn_def_id, trait_m, item)
+        {
+            return ty;
+        }
+        Ty::new_adt(
+            tcx,
+            tcx.adt_def(record),
+            ty::GenericArgs::identity_for_item(tcx, record.to_def_id()),
+        )
+    }
+
+    /// The trait method's record that a trait impl method's record parameter `item` stands for,
+    /// see `lower_record_param_ty`. `None` if the trait method has no record there, or generic
+    /// parameters the impl method can't pass, which `compare_impl_item` reports.
+    fn trait_record_ty(
+        &self,
+        impl_m: LocalDefId,
+        trait_m: DefId,
+        item: hir::ItemId,
+    ) -> Option<Ty<'tcx>> {
+        let tcx = self.tcx();
+        let decl = tcx.hir_fn_decl_by_hir_id(tcx.local_def_id_to_hir_id(impl_m))?;
+        let index = decl
+            .inputs
+            .iter()
+            .position(|input| matches!(input.kind, hir::TyKind::Record(i) if i == item))?;
+        let trait_sig = tcx.fn_sig(trait_m).instantiate_identity().skip_norm_wip();
+        let trait_input = *trait_sig.skip_binder().inputs().get(index)?;
+        let &ty::Adt(trait_record, _) = trait_input.kind() else { return None };
+        if !tcx.is_record(trait_record.did()) {
+            return None;
+        }
+        let (trait_generics, impl_generics) = (tcx.generics_of(trait_m), tcx.generics_of(impl_m));
+        if trait_generics.own_params.len() != impl_generics.own_params.len()
+            || trait_generics
+                .own_params
+                .iter()
+                .zip(&impl_generics.own_params)
+                .any(|(t, i)| std::mem::discriminant(&t.kind) != std::mem::discriminant(&i.kind))
+        {
+            return None;
+        }
+        let impl_def_id = tcx.local_parent(impl_m);
+        let trait_ref = tcx.impl_trait_ref(impl_def_id).instantiate_identity().skip_norm_wip();
+        let args = ty::GenericArgs::identity_for_item(tcx, impl_m).rebase_onto(
+            tcx,
+            impl_def_id.to_def_id(),
+            trait_ref.args,
+        );
+        Some(Ty::new_adt(tcx, trait_record, args))
     }
 
     /// Lower an opaque type (i.e., an existential impl-Trait type) from the HIR.

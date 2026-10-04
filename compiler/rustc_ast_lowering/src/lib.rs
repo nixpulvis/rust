@@ -154,8 +154,12 @@ pub(crate) mod re_lowering {
 
 struct PerOwnerLoweringState<'a, 'hir> {
     // -- Identity --
+    owner_id: hir::OwnerId,
+    /// The resolutions for the owner, or, for a record, for its function.
     owner: &'a PerOwnerResolverData<'hir>,
     disambiguator: PerParentDisambiguatorState,
+    /// Whether this is the anonymous struct of a parameter, see `lower_record`.
+    is_record: bool,
 
     // -- HirId allocation --
     item_local_id_counter: hir::ItemLocalId,
@@ -187,16 +191,26 @@ struct PerOwnerLoweringState<'a, 'hir> {
 impl<'a, 'hir> PerOwnerLoweringState<'a, 'hir> {
     fn new(resolver: &'a ResolverAstLowering<'hir>, owner: NodeId) -> Self {
         let owner = &resolver.owners[&owner];
+        Self::with_tables(resolver, owner, owner.def_id)
+    }
 
+    /// The state for lowering `def_id`, which takes its resolutions from `owner`.
+    fn with_tables(
+        resolver: &'a ResolverAstLowering<'hir>,
+        owner: &'a PerOwnerResolverData<'hir>,
+        def_id: LocalDefId,
+    ) -> Self {
         let disambiguator = resolver
             .disambiguators
-            .get(&owner.def_id)
+            .get(&def_id)
             .map(|s| s.steal())
-            .unwrap_or_else(|| PerParentDisambiguatorState::new(owner.def_id));
+            .unwrap_or_else(|| PerParentDisambiguatorState::new(def_id));
 
         PerOwnerLoweringState {
+            owner_id: hir::OwnerId { def_id },
             owner,
             disambiguator,
+            is_record: false,
             // 0 corresponds to `owner` lowered as `owner_id`, and we never call
             // `lower_node_id(owner)`.
             item_local_id_counter: hir::ItemLocalId::new(1),
@@ -215,7 +229,7 @@ impl<'a, 'hir> PerOwnerLoweringState<'a, 'hir> {
     }
 
     fn owner_id(&self) -> hir::OwnerId {
-        hir::OwnerId { def_id: self.owner.def_id }
+        self.owner_id
     }
 
     fn into_owner_info(
@@ -1650,6 +1664,15 @@ impl<'hir> LoweringContext<'_, 'hir> {
                         let def_id = self.local_def_id(*def_node_id);
                         let name = self.tcx.item_name(def_id.to_def_id());
                         let ident = Ident::new(name, span);
+                        // In a field of a record, `impl Trait` is a parameter of the function,
+                        // which lowers it (see `lower_record`).
+                        if self.curr_owner.is_record {
+                            return hir::Ty {
+                                kind: self.universal_param_ty(*def_node_id, span, ident),
+                                span: self.lower_span(t.span),
+                                hir_id: self.lower_node_id(t.id),
+                            };
+                        }
                         let (param, bounds, path) = self.lower_universal_param_and_bounds(
                             *def_node_id,
                             span,
@@ -1730,6 +1753,12 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 let e = self.emit_bad_gca_macro(t.span, expr, "type");
                 hir::TyKind::Err(e)
             }
+            TyKind::Record(record) => match itctx {
+                ImplTraitContext::Universal => hir::TyKind::Record(self.lower_record(record)),
+                _ => hir::TyKind::Err(
+                    self.dcx().span_delayed_bug(t.span, "record outside of a parameter's type"),
+                ),
+            },
             TyKind::Dummy => panic!("`TyKind::Dummy` should never be lowered"),
         };
 
@@ -2504,6 +2533,19 @@ impl<'hir> LoweringContext<'_, 'hir> {
         ident: Ident,
         bounds: &[GenericBound],
     ) -> (hir::GenericParam<'hir>, Option<hir::WherePredicate<'hir>>, hir::TyKind<'hir>) {
+        let (param, preds) = self.lower_universal_param(node_id, span, ident, bounds);
+        let ty = self.universal_param_ty(node_id, span, ident);
+        (param, preds, ty)
+    }
+
+    /// The parameter of `impl Trait` in argument position, and its bounds.
+    fn lower_universal_param(
+        &mut self,
+        node_id: NodeId,
+        span: Span,
+        ident: Ident,
+        bounds: &[GenericBound],
+    ) -> (hir::GenericParam<'hir>, Option<hir::WherePredicate<'hir>>) {
         // Add a definition for the in-band `Param`.
         let def_id = self.local_def_id(node_id);
         let span = self.lower_span(span);
@@ -2531,10 +2573,21 @@ impl<'hir> LoweringContext<'_, 'hir> {
             ImplTraitContext::Universal,
             hir::PredicateOrigin::ImplTrait,
         );
+        (param, preds)
+    }
 
+    /// The type of `impl Trait` in argument position, a path to its parameter.
+    fn universal_param_ty(
+        &mut self,
+        node_id: NodeId,
+        span: Span,
+        ident: Ident,
+    ) -> hir::TyKind<'hir> {
+        let def_id = self.local_def_id(node_id);
+        let span = self.lower_span(span);
         let hir_id = self.next_id();
         let res = Res::Def(DefKind::TyParam, def_id.to_def_id());
-        let ty = hir::TyKind::Path(hir::QPath::Resolved(
+        hir::TyKind::Path(hir::QPath::Resolved(
             None,
             self.arena.alloc(hir::Path {
                 span,
@@ -2542,9 +2595,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 segments:
                     arena_vec![self; hir::PathSegment::new(self.lower_ident(ident), hir_id, res)],
             }),
-        ));
-
-        (param, preds, ty)
+        ))
     }
 
     /// Lowers a block directly to an expression, presuming that it

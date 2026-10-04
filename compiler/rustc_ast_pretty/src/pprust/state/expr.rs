@@ -152,7 +152,12 @@ impl<'a> State<'a> {
         fields: &[ast::ExprField],
         rest: &ast::StructRest,
     ) {
-        if let Some(qself) = qself {
+        // An inferred struct literal, `_ { .. }` (`#![feature(struct_args)]`), is `<_>::_ { .. }`.
+        let is_inferred = matches!(qself, Some(qself) if matches!(qself.ty.kind, ast::TyKind::Infer))
+            && matches!(&path.segments[..], [segment] if segment.ident.name == rustc_span::kw::Underscore);
+        if is_inferred {
+            self.word("_");
+        } else if let Some(qself) = qself {
             self.print_qpath(path, qself, true);
         } else {
             self.print_path(path, true, 0);

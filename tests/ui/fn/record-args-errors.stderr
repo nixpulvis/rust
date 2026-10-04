@@ -1,0 +1,151 @@
+error: expected a binding for a record parameter
+  --> $DIR/record-args-errors.rs:73:18
+   |
+LL | fn tuple_binding((a, b): _ { x: u32 }) {}
+   |                  ^^^^^^ expected a name, as in `args: _ { .. }`
+
+error[E0053]: field `times` of a record parameter has an incompatible type for trait
+  --> $DIR/record-args-errors.rs:16:47
+   |
+LL |     fn write(&mut self, _ { data: u32, times: u32 }) {}
+   |                                               ^^^ expected `usize`, found `u32`
+   |
+note: type in trait
+  --> $DIR/record-args-errors.rs:11:40
+   |
+LL |     fn write(&mut self, _ { data: u32, times: usize = 1 });
+   |                                        ^^^^^^^^^^^^^^^^
+
+error: default values are not allowed in trait impls
+  --> $DIR/record-args-errors.rs:48:40
+   |
+LL |     fn write(&mut self, _ { data: u32, times: usize = 2 }) {
+   |                                        ^^^^^^^^^^^^^^^^
+   |
+   = note: the defaults of a record parameter come from the trait
+
+error[E0053]: method `write` has an incompatible type for trait
+  --> $DIR/record-args-errors.rs:79:14
+   |
+LL |     fn write(&self, _ { data: u32, count: usize }) {}
+   |              ^^^^^ types differ in mutability
+   |
+note: type in trait
+  --> $DIR/record-args-errors.rs:11:14
+   |
+LL |     fn write(&mut self, _ { data: u32, times: usize = 1 });
+   |              ^^^^^^^^^
+   = note: expected signature `fn(&mut RenamedAndMut, {record@$DIR/record-args-errors.rs:11:25: 11:26})`
+              found signature `fn(&RenamedAndMut, {record@$DIR/record-args-errors.rs:11:25: 11:26})`
+help: change the self-receiver type to match the trait
+   |
+LL |     fn write(&mut self, _ { data: u32, count: usize }) {}
+   |               +++
+
+error[E0038]: the trait `Merge` is not dyn compatible
+  --> $DIR/record-args-errors.rs:92:18
+   |
+LL | fn merge_dyn(m: &dyn Merge) {}
+   |                  ^^^^^^^^^ `Merge` is not dyn compatible
+   |
+note: for a trait to be dyn compatible it needs to allow building a vtable
+      for more information, visit <https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility>
+  --> $DIR/record-args-errors.rs:90:29
+   |
+LL | trait Merge {
+   |       ----- this trait is not dyn compatible...
+...
+LL |     fn merge_unsized(&self, _ { other: Box<Self> });
+   |                             ^^^^^^^^^^^^^^^^^^^^^^ ...because method `merge_unsized` references the `Self` type in this parameter
+   = help: consider moving `merge_unsized` to another trait
+
+error: field `extra` is not a member of the trait's record
+  --> $DIR/record-args-errors.rs:22:54
+   |
+LL |     fn write(&mut self, _ { data: u32, times: usize, extra: u8 }) {}
+   |                                                      ^^^^^ not a member of the trait's record
+
+error: missing field `times` in record parameter
+  --> $DIR/record-args-errors.rs:28:25
+   |
+LL |     fn write(&mut self, _ { data: u32, times: usize = 1 });
+   |                                        ---------------- `times` from trait
+...
+LL |     fn write(&mut self, _ { data: u32 }) {}
+   |                         ^^^^^^^^^^^^^^^ missing `times` in implementation
+
+error: field `count` is not a member of the trait's record
+  --> $DIR/record-args-errors.rs:35:40
+   |
+LL |     fn write(&mut self, _ { data: u32, count: usize }) {}
+   |                                        ^^^^^
+   |                                        |
+   |                                        not a member of the trait's record
+   |                                        help: the trait's record has a field named `times`
+
+error: missing field `times` in record parameter
+  --> $DIR/record-args-errors.rs:35:25
+   |
+LL |     fn write(&mut self, _ { data: u32, times: usize = 1 });
+   |                                        ---------------- `times` from trait
+...
+LL |     fn write(&mut self, _ { data: u32, count: usize }) {}
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
+
+error: field `dta` is not a member of the trait's record
+  --> $DIR/record-args-errors.rs:42:29
+   |
+LL |     fn write(&mut self, _ { dta: u32, times: usize }) {}
+   |                             ^^^ not a member of the trait's record
+   |
+help: a field with a similar name exists
+   |
+LL |     fn write(&mut self, _ { data: u32, times: usize }) {}
+   |                              +
+
+error[E0063]: missing field `x` in initializer of `{record@$DIR/record-args-errors.rs:6:9: 6:10}`
+  --> $DIR/record-args-errors.rs:55:10
+   |
+LL |     crop(_ { y: 2 });
+   |          ^ missing `x`
+
+error: missing field `x` in initializer
+  --> $DIR/record-args-errors.rs:57:20
+   |
+LL |     crop(_ { y: 2, .. });
+   |                    ^ fields that do not have a defaulted value must be provided explicitly
+
+error[E0071]: expected struct, variant or union type, found `u32`
+  --> $DIR/record-args-errors.rs:62:18
+   |
+LL |     let _: u32 = _ { x: 1 };
+   |                  ^ not a struct
+
+error[E0282]: type annotations needed
+  --> $DIR/record-args-errors.rs:68:13
+   |
+LL |     let _ = _ { x: 1, .. };
+   |             ^ cannot infer type
+
+error: field `count` is not a member of the trait's record
+  --> $DIR/record-args-errors.rs:79:36
+   |
+LL |     fn write(&self, _ { data: u32, count: usize }) {}
+   |                                    ^^^^^
+   |                                    |
+   |                                    not a member of the trait's record
+   |                                    help: the trait's record has a field named `times`
+
+error: missing field `times` in record parameter
+  --> $DIR/record-args-errors.rs:79:21
+   |
+LL |     fn write(&mut self, _ { data: u32, times: usize = 1 });
+   |                                        ---------------- `times` from trait
+...
+LL |     fn write(&self, _ { data: u32, count: usize }) {}
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
+
+error: aborting due to 16 previous errors
+
+Some errors have detailed explanations: E0038, E0053, E0063, E0071, E0282.
+For more information about an error, try `rustc --explain E0038`.

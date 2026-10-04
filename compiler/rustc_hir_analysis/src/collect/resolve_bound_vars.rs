@@ -264,6 +264,13 @@ fn resolve_bound_vars(tcx: TyCtxt<'_>, local_def_id: hir::OwnerId) -> ResolveBou
         opaque_capture_errors: RefCell::new(None),
     };
     match tcx.hir_owner_node(local_def_id) {
+        // A record's fields use its function's generic parameters.
+        hir::OwnerNode::Item(item) if tcx.is_record(item.owner_id.to_def_id()) => {
+            let scope =
+                Scope::Root { opt_parent_item: Some(tcx.local_parent(item.owner_id.def_id)) };
+            visitor.scope = &scope;
+            visitor.visit_item(item)
+        }
         hir::OwnerNode::Item(item) => visitor.visit_item(item),
         hir::OwnerNode::ForeignItem(item) => visitor.visit_foreign_item(item),
         hir::OwnerNode::TraitItem(item) => {
@@ -2614,6 +2621,17 @@ fn is_late_bound_map(
     let mut appears_in_where_clause =
         AllCollector { has_fully_capturing_opaque: true, regions: Default::default() };
     appears_in_where_clause.visit_generics(generics);
+    // A record shares its function's generics (see `generics_of`), so the lifetimes its fields use
+    // must be early-bound, like lifetimes in where-clauses.
+    for arg_ty in sig.decl.inputs {
+        if let hir::TyKind::Record(item) = arg_ty.kind
+            && let hir::ItemKind::Struct(_, _, data) = tcx.hir_item(item).kind
+        {
+            for field in data.fields() {
+                appears_in_where_clause.visit_ty_unambig(field.ty);
+            }
+        }
+    }
     debug!(?appears_in_where_clause.regions);
 
     // Late bound regions are those that:

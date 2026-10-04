@@ -4,7 +4,7 @@ use std::cmp::min;
 use itertools::Itertools;
 use rustc_ast::token::{Delimiter, Lit, LitKind};
 use rustc_ast::{ForLoopKind, MatchKind, ast, token};
-use rustc_span::{BytePos, Span};
+use rustc_span::{BytePos, Span, kw};
 use tracing::debug;
 
 use crate::chains::rewrite_chain;
@@ -1822,7 +1822,15 @@ fn rewrite_struct_lit<'a>(
 
     // 2 = " {".len()
     let path_shape = shape.sub_width(2, span)?;
-    let path_str = rewrite_path(context, PathContext::Expr, qself, path, path_shape)?;
+    // An inferred struct literal, `_ { .. }` (`#![feature(struct_args)]`), is parsed as
+    // `<_>::_ { .. }`.
+    let is_inferred = matches!(qself, Some(qself) if matches!(qself.ty.kind, ast::TyKind::Infer))
+        && matches!(&path.segments[..], [segment] if segment.ident.name == kw::Underscore);
+    let path_str = if is_inferred {
+        "_".to_owned()
+    } else {
+        rewrite_path(context, PathContext::Expr, qself, path, path_shape)?
+    };
 
     let has_base_or_rest = match struct_rest {
         ast::StructRest::None if fields.is_empty() => return Ok(format!("{path_str} {{}}")),

@@ -1,0 +1,30 @@
+error[E0658]: record parameters and arguments are experimental
+  --> $DIR/feature-gate-struct_args.rs:1:6
+   |
+LL | fn f(_ { x: u32 }) -> u32 { x }
+   |      ^^^^^^^^^^^^
+   |
+   = help: add `#![feature(struct_args)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error[E0658]: record parameters and arguments are experimental
+  --> $DIR/feature-gate-struct_args.rs:6:6
+   |
+LL | fn g(Args { y }) -> u32 { y }
+   |      ^^^^^^^^^^
+   |
+   = help: add `#![feature(struct_args)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error[E0658]: record parameters and arguments are experimental
+  --> $DIR/feature-gate-struct_args.rs:9:7
+   |
+LL |     f(_ { x: 1 });
+   |       ^^^^^^^^^^
+   |
+   = help: add `#![feature(struct_args)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0658`.

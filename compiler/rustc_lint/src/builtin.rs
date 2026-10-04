@@ -335,6 +335,16 @@ impl MissingDoc {
         if def_id != CRATE_DEF_ID && !cx.effective_visibilities.is_exported(def_id) {
             return;
         }
+        // A record, the anonymous struct of a parameter, and its fields are documented with
+        // their function.
+        let tcx = cx.tcx;
+        if def_id != CRATE_DEF_ID
+            && (tcx.is_record(def_id.to_def_id())
+                || tcx.def_kind(def_id) == DefKind::Field
+                    && tcx.is_record(tcx.parent(def_id.to_def_id())))
+        {
+            return;
+        }
 
         let attrs = cx.tcx.hir_attrs(cx.tcx.local_def_id_to_hir_id(def_id));
         let has_doc = attrs.iter().any(has_doc);
@@ -458,7 +468,10 @@ declare_lint_pass!(MissingCopyImplementations => [MISSING_COPY_IMPLEMENTATIONS])
 
 impl<'tcx> LateLintPass<'tcx> for MissingCopyImplementations {
     fn check_item(&mut self, cx: &LateContext<'_>, item: &hir::Item<'_>) {
-        if !cx.effective_visibilities.is_reachable(item.owner_id.def_id) {
+        // A record, the anonymous struct of a parameter, can't have impls.
+        if !cx.effective_visibilities.is_reachable(item.owner_id.def_id)
+            || cx.tcx.is_record(item.owner_id.to_def_id())
+        {
             return;
         }
         let (def, ty) = match item.kind {
@@ -603,7 +616,8 @@ impl_lint_pass!(MissingDebugImplementations => [MISSING_DEBUG_IMPLEMENTATIONS]);
 impl<'tcx> LateLintPass<'tcx> for MissingDebugImplementations {
     fn check_item(&mut self, cx: &LateContext<'_>, item: &hir::Item<'_>) {
         let def_id = item.owner_id.def_id;
-        if !cx.effective_visibilities.is_reachable(def_id) {
+        // A record, the anonymous struct of a parameter, can't have impls.
+        if !cx.effective_visibilities.is_reachable(def_id) || cx.tcx.is_record(def_id.to_def_id()) {
             return;
         }
 

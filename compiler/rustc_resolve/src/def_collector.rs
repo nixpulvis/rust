@@ -444,6 +444,24 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
     }
 
     fn visit_ty(&mut self, ty: &'a Ty) {
+        if let TyKind::Record(record) = &ty.kind {
+            // The record is a struct of its own, a child of its function, and its fields are its
+            // children.
+            let feed = self.create_def(
+                record.id,
+                Some(sym::record_struct),
+                DefKind::Struct,
+                record.ident_span,
+            );
+            let vis = self.resolve_visibility(&record.vis);
+            self.r.feed_visibility(feed, vis);
+            self.with_parent(feed.def_id(), |this| {
+                for (index, field) in record.fields.iter().enumerate() {
+                    this.collect_field(field, Some(index));
+                }
+            });
+            return;
+        }
         match ty.kind {
             TyKind::MacCall(..) => {
                 self.visit_macro_invoc(ty.id);
@@ -460,7 +478,14 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
                     ImplTraitContext::Existential => DefKind::OpaqueTy,
                     ImplTraitContext::InBinding => return visit::walk_ty(self, ty),
                 };
+                // `impl Trait` in a field of a record is a parameter of the record's function.
+                let mut parent = self.invocation_parent.parent_def;
+                if kind == DefKind::TyParam && self.r.tcx.def_kind(parent) == DefKind::Field {
+                    parent = self.r.tcx.local_parent(self.r.tcx.local_parent(parent));
+                }
+                let orig_parent_def = mem::replace(&mut self.invocation_parent.parent_def, parent);
                 let id = self.create_def(opaque_id, Some(name), kind, ty.span).def_id();
+                self.invocation_parent.parent_def = orig_parent_def;
                 match self.invocation_parent.impl_trait_context {
                     // Do not nest APIT, as we desugar them as `impl_trait: bounds`,
                     // so the `impl_trait` node is not a parent to `bounds`.

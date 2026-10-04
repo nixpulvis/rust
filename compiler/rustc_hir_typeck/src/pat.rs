@@ -37,6 +37,16 @@ use crate::expectation::Expectation;
 use crate::gather_locals::DeclOrigin;
 use crate::{FnCtxt, diagnostics};
 
+/// Whether `qpath` is that of a record parameter's pattern (`#![feature(struct_args)]`),
+/// `<_>::_ { x, y }`, whose struct is the parameter's.
+fn is_record_pat_path(qpath: &hir::QPath<'_>) -> bool {
+    matches!(
+        qpath,
+        hir::QPath::TypeRelative(hir::Ty { kind: hir::TyKind::Infer(_), .. }, segment)
+            if segment.ident.name == kw::Underscore
+    )
+}
+
 const CANNOT_IMPLICITLY_DEREF_POINTER_TRAIT_OBJ: &str = "\
 This error indicates that a pointer to a trait type cannot be implicitly dereferenced by a \
 pattern. Every trait defines a type, but because the size of trait implementors isn't fixed, \
@@ -410,7 +420,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             PatKind::Expr(PatExpr { kind: PatExprKind::Path(qpath), hir_id, span }) => {
                 Some(self.resolve_pat_path(*hir_id, *span, qpath))
             }
-            PatKind::Struct(ref qpath, ..) => Some(self.resolve_pat_struct(pat, qpath)),
+            PatKind::Struct(ref qpath, ..) => Some(self.resolve_pat_struct(pat, qpath, expected)),
             PatKind::TupleStruct(ref qpath, ..) => Some(self.resolve_pat_tuple_struct(pat, qpath)),
             _ => None,
         };
@@ -1521,7 +1531,28 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         &self,
         pat: &'tcx Pat<'tcx>,
         qpath: &hir::QPath<'tcx>,
+        expected: Ty<'tcx>,
     ) -> Result<ResolvedPat<'tcx>, ErrorGuaranteed> {
+        // The pattern of a record parameter takes its struct from the parameter.
+        if is_record_pat_path(qpath) {
+            let ty = self.structurally_resolve_type(pat.span, expected);
+            return match *ty.kind() {
+                ty::Adt(adt, _) if adt.is_struct() => {
+                    self.write_resolution(pat.hir_id, Ok((DefKind::Struct, adt.did())));
+                    let variant = adt.non_enum_variant();
+                    Ok(ResolvedPat { ty, kind: ResolvedPatKind::Struct { variant } })
+                }
+                ty::Error(guar) => Err(guar),
+                _ => Err(struct_span_code_err!(
+                    self.dcx(),
+                    pat.span,
+                    E0071,
+                    "expected struct, found {}",
+                    ty.sort_string(self.tcx)
+                )
+                .emit_err()),
+            };
+        }
         // Resolve the path and check the definition for errors.
         let (variant, pat_ty) = self.check_struct_path(qpath, pat.hir_id)?;
         Ok(ResolvedPat { ty: pat_ty, kind: ResolvedPatKind::Struct { variant } })
@@ -2149,6 +2180,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             .filter(|(_, ident)| !used_fields.contains_key(ident))
             .collect::<Vec<_>>();
 
+        // A record parameter's pattern (`#![feature(struct_args)]`) only differs from its record in
+        // a trait impl, where it lists the fields of the trait's record.
+        if let PatKind::Struct(qpath, ..) = &pat.kind
+            && is_record_pat_path(qpath)
+            && (!inexistent_fields.is_empty() || !unmentioned_fields.is_empty())
+        {
+            return Err(self.error_trait_record_fields(
+                pat,
+                &inexistent_fields,
+                unmentioned_fields,
+            ));
+        }
+
         let inexistent_fields_err = if !inexistent_fields.is_empty()
             && !inexistent_fields.iter().any(|field| field.ident.name == kw::Underscore)
         {
@@ -2307,6 +2351,55 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         .with_span_label(span, format!("multiple uses of `{ident}` in pattern"))
         .with_span_label(other_field, format!("first use of `{ident}`"))
         .emit_err()
+    }
+
+    /// Reports the fields of a trait impl's record parameter that differ from those of the trait's
+    /// record, which the parameter takes (see `check_struct_pat_fields`).
+    fn error_trait_record_fields(
+        &self,
+        pat: &'tcx Pat<'tcx>,
+        inexistent_fields: &[&hir::PatField<'tcx>],
+        mut unmentioned_fields: Vec<(&'tcx ty::FieldDef, Ident)>,
+    ) -> ErrorGuaranteed {
+        let mut guar = None;
+        for field in inexistent_fields {
+            let (span, name) = (field.ident.span, field.ident.name);
+            let mut err = self.dcx().struct_span_err(
+                span,
+                format!("field `{name}` is not a member of the trait's record"),
+            );
+            err.span_label(span, "not a member of the trait's record");
+            if let [(trait_field, _)] = unmentioned_fields.as_slice() {
+                if find_best_match_for_name(&[trait_field.name], name, None).is_some() {
+                    err.span_suggestion_verbose(
+                        span,
+                        "a field with a similar name exists",
+                        trait_field.name,
+                        Applicability::MaybeIncorrect,
+                    );
+                    unmentioned_fields.clear();
+                } else if inexistent_fields.len() == 1 {
+                    err.span_suggestion_short(
+                        span,
+                        format!("the trait's record has a field named `{}`", trait_field.name),
+                        trait_field.name,
+                        Applicability::MaybeIncorrect,
+                    );
+                }
+            }
+            guar = Some(err.emit_err());
+        }
+        for (trait_field, ident) in unmentioned_fields {
+            let mut err = self
+                .dcx()
+                .struct_span_err(pat.span, format!("missing field `{ident}` in record parameter"));
+            err.span_label(pat.span, format!("missing `{ident}` in implementation"));
+            if let Some(span) = self.tcx.hir_span_if_local(trait_field.did) {
+                err.span_label(span, format!("`{ident}` from trait"));
+            }
+            guar = Some(err.emit_err());
+        }
+        guar.unwrap()
     }
 
     fn error_inexistent_fields(
