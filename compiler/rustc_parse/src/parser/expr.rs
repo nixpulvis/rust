@@ -90,9 +90,100 @@ impl<'a> Parser<'a> {
         self.parse_expr().map(|value| AnonConst { id: DUMMY_NODE_ID, value })
     }
 
-    /// Parses a sequence of expressions delimited by parentheses.
+    /// Parses the arguments of a call, `(a, b)`. Trailing named arguments, `(a, x: 1, y: 2, ..)`,
+    /// are a record argument, see `parse_expr_named_args`.
     fn parse_expr_paren_seq(&mut self) -> PResult<'a, ThinVec<Box<Expr>>> {
-        self.parse_paren_comma_seq(Self::parse_expr).map(|(r, _)| r)
+        self.parse_paren_comma_seq(|this| {
+            if this.is_named_arg_start() { this.parse_expr_named_args() } else { this.parse_expr() }
+        })
+        .map(|(r, _)| r)
+    }
+
+    /// Checks for `x:`, the start of a named argument.
+    fn is_named_arg_start(&self) -> bool {
+        self.token.non_reserved_ident().is_some() && self.look_ahead(1, |t| *t == token::Colon)
+    }
+
+    /// Parses named arguments, `x: 1, y: 2, ..`, up to the closing `)` of a call
+    /// (`#![feature(struct_args_sugar)]`). They are sugar for the record argument
+    /// `_ { x: 1, y: 2, .. }`. `..` means the remaining fields only here, after a named
+    /// argument, since `f(..)` passes a `RangeFull`.
+    fn parse_expr_named_args(&mut self) -> PResult<'a, Box<Expr>> {
+        let lo = self.token.span;
+        let mut fields = ThinVec::new();
+        let mut rest = ast::StructRest::None;
+        let mut recovered = None;
+        loop {
+            if self.eat(exp!(DotDot)) {
+                let dots = self.prev_token.span;
+                rest = if self.check(exp!(CloseParen)) || self.check(exp!(Comma)) {
+                    ast::StructRest::Rest(dots)
+                } else {
+                    ast::StructRest::Base(self.parse_expr()?)
+                };
+                if self.check(exp!(Comma)) && !self.look_ahead(1, |t| *t == token::CloseParen) {
+                    recovered = Some(self.dcx().span_err(
+                        dots.to(self.prev_token.span),
+                        "`..` must come after the other named arguments",
+                    ));
+                }
+            } else if self.is_named_arg_start() {
+                fields.push(self.parse_expr_field()?);
+            } else {
+                let expr = self.parse_expr()?;
+                let mut err = self.dcx().struct_span_err(
+                    expr.span,
+                    "positional arguments must come before named arguments",
+                );
+                // Recover `f(x: 1, y)` as the field shorthand `y: y`.
+                if let ExprKind::Path(None, path) = &expr.kind
+                    && let [segment] = &path.segments[..]
+                    && segment.args.is_none()
+                {
+                    let ident = segment.ident;
+                    err.span_suggestion_verbose(
+                        ident.span.shrink_to_lo(),
+                        "to pass it as a named argument, name it",
+                        format!("{ident}: "),
+                        Applicability::MaybeIncorrect,
+                    );
+                    fields.push(ExprField {
+                        ident,
+                        span: expr.span,
+                        expr,
+                        is_shorthand: true,
+                        attrs: AttrVec::new(),
+                        id: DUMMY_NODE_ID,
+                        is_placeholder: false,
+                    });
+                }
+                recovered = Some(err.emit_err());
+            }
+            if !self.check(exp!(Comma)) || self.look_ahead(1, |t| *t == token::CloseParen) {
+                break;
+            }
+            self.bump(); // `,`
+        }
+        // Don't also report fields missing because of a recovered error.
+        if let (Some(guar), ast::StructRest::None) = (recovered, &rest) {
+            rest = ast::StructRest::NoneWithError(guar);
+        }
+        let span = lo.to(self.prev_token.span);
+        let qself = Box::new(ast::QSelf {
+            ty: self.mk_ty(span, TyKind::Infer),
+            path_span: span.shrink_to_lo(),
+            position: 0,
+        });
+        let path = Path::from_ident(Ident::new(kw::Underscore, span));
+        let kind = ExprKind::Struct(Box::new(ast::StructExpr {
+            qself: Some(qself),
+            path,
+            fields,
+            rest,
+            is_named_args: true,
+        }));
+        self.psess.gated_spans.gate(sym::struct_args_sugar, span);
+        Ok(self.mk_expr(span, kind))
     }
 
     /// Parses an expression, subject to the given restrictions.
@@ -3892,7 +3983,13 @@ impl<'a> Parser<'a> {
         let expr = if let Some(guar) = recovered_async {
             ExprKind::Err(guar)
         } else {
-            ExprKind::Struct(Box::new(ast::StructExpr { qself, path: pth, fields, rest: base }))
+            ExprKind::Struct(Box::new(ast::StructExpr {
+                qself,
+                path: pth,
+                fields,
+                rest: base,
+                is_named_args: false,
+            }))
         };
         Ok(self.mk_expr(span, expr))
     }

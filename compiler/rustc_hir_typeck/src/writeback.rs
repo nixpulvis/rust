@@ -70,6 +70,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         wbcx.visit_closures();
         wbcx.visit_liberated_fn_sigs();
         wbcx.visit_fru_field_types();
+        wbcx.visit_omitted_record_args();
         wbcx.visit_opaque_types();
         wbcx.visit_coercion_casts();
         wbcx.visit_user_provided_tys();
@@ -785,6 +786,16 @@ impl<'cx, 'tcx> WritebackCx<'cx, 'tcx> {
             let hir_id = HirId { owner: common_hir_owner, local_id };
             let ftys = self.resolve(ftys.clone(), &hir_id);
             self.typeck_results.fru_field_types_mut().insert(hir_id, ftys);
+        }
+    }
+
+    fn visit_omitted_record_args(&mut self) {
+        let fcx_typeck_results = self.fcx.typeck_results.borrow();
+        let common_hir_owner = fcx_typeck_results.hir_owner;
+        for (local_id, &ty) in fcx_typeck_results.omitted_record_args().items_in_stable_order() {
+            let hir_id = HirId { owner: common_hir_owner, local_id };
+            let ty = self.resolve(ty, &hir_id);
+            self.typeck_results.omitted_record_args_mut().insert(hir_id, ty);
         }
     }
 

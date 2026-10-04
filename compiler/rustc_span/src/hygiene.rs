@@ -1240,6 +1240,8 @@ pub enum DesugaringKind {
         source: bool,
     },
     RangeExpr,
+    /// Named arguments, `f(x: 1)`, lowered to the struct literal `_ { x: 1, .. }`.
+    NamedArgs,
 }
 
 impl DesugaringKind {
@@ -1262,6 +1264,7 @@ impl DesugaringKind {
                 "expression that expanded into a format string literal"
             }
             DesugaringKind::RangeExpr => "range expression",
+            DesugaringKind::NamedArgs => "named arguments",
         }
     }
 
@@ -1282,6 +1285,7 @@ impl DesugaringKind {
             DesugaringKind::PatTyRange => value == "PatTyRange",
             DesugaringKind::FormatLiteral { .. } => value == "FormatLiteral",
             DesugaringKind::RangeExpr => value == "RangeExpr",
+            DesugaringKind::NamedArgs => value == "NamedArgs",
         }
     }
 }

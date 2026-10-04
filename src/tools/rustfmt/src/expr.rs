@@ -157,7 +157,13 @@ pub(crate) fn format_expr(
                 fields,
                 path,
                 rest,
+                is_named_args,
             } = &**struct_expr;
+            // Named arguments, `f(x: 1, ..)` (`#![feature(struct_args_sugar)]`), are kept as
+            // written.
+            if *is_named_args {
+                return Ok(context.snippet(expr.span).to_owned());
+            }
             rewrite_struct_lit(
                 context,
                 path,

@@ -1742,6 +1742,10 @@ pub struct StructExpr {
     pub path: Path,
     pub fields: ThinVec<ExprField>,
     pub rest: StructRest,
+    /// Whether this was written as named arguments, `f(x: 1)`, which are sugar for the struct
+    /// literal `_ { x: 1, .. }` (`#![feature(struct_args_sugar)]`). `rest` is as written, and
+    /// lowering adds the implied `..`.
+    pub is_named_args: bool,
 }
 
 // Adding a new variant? Please update `test_expr` in `tests/ui/macros/stringify.rs`.

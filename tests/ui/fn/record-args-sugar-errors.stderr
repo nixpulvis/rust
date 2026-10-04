@@ -1,0 +1,102 @@
+error: positional arguments must come before named arguments
+  --> $DIR/record-args-sugar-errors.rs:30:22
+   |
+LL |     greet(name: "x", times);
+   |                      ^^^^^
+   |
+help: to pass it as a named argument, name it
+   |
+LL |     greet(name: "x", times: times);
+   |                      ++++++
+
+error: positional arguments must come before named arguments
+  --> $DIR/record-args-sugar-errors.rs:32:22
+   |
+LL |     greet(name: "x", 3);
+   |                      ^
+
+error: `..` must come after the other named arguments
+  --> $DIR/record-args-sugar-errors.rs:34:22
+   |
+LL |     greet(name: "x", .., times: 2);
+   |                      ^^
+
+error: record parameter fields are separated by `,`
+  --> $DIR/record-args-sugar-errors.rs:54:28
+   |
+LL | fn two_semis(a: u32; b: u32; c: u32) {}
+   |                    -       ^ help: replace `;` with `,`
+   |                    |
+   |                    while parsing this record parameter
+
+error[E0071]: named arguments need a record parameter, but this parameter has type `i32`
+  --> $DIR/record-args-sugar-errors.rs:28:19
+   |
+LL |     positional(1, b: 2);
+   |                   ^^^^ expected `i32`
+   |
+   = help: or, to take it by name, declare the parameter as a record: `_ { b: i32 }`
+help: pass the argument by position
+   |
+LL -     positional(1, b: 2);
+LL +     positional(1, 2);
+   |
+
+error: missing named argument `name`
+  --> $DIR/record-args-sugar-errors.rs:37:11
+   |
+LL |     greet(times: 2);
+   |           ^^^^^^^^ missing `name`
+
+error[E0061]: this function takes 1 argument but 0 arguments were supplied
+  --> $DIR/record-args-sugar-errors.rs:43:5
+   |
+LL |     greet();
+   |     ^^^^^-- argument #1 of type `{record@$DIR/record-args-sugar-errors.rs:10:10: 10:11}` is missing
+   |
+note: function defined here
+  --> $DIR/record-args-sugar-errors.rs:10:4
+   |
+LL | fn greet(_ { name: &str, times: usize = 1 }) -> usize {
+   |    ^^^^^ ----------------------------------
+help: provide the argument
+   |
+LL |     greet(/* {record@record-args-sugar-errors.rs:10:10} */);
+   |           ++++++++++++++++++++++++++++++++++++++++++++++++
+
+error[E0061]: this function takes 1 argument but 0 arguments were supplied
+  --> $DIR/record-args-sugar-errors.rs:46:5
+   |
+LL |     run();
+   |     ^^^-- argument #1 of type `Options` is missing
+   |
+note: function defined here
+  --> $DIR/record-args-sugar-errors.rs:18:4
+   |
+LL | fn run(options: Options) -> bool {
+   |    ^^^ ----------------
+help: provide the argument
+   |
+LL |     run(/* Options */);
+   |         +++++++++++++
+
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> $DIR/record-args-sugar-errors.rs:49:5
+   |
+LL |     first(1);
+   |     ^^^^^ - argument #1 of type `{record@$DIR/record-args-sugar-errors.rs:22:10: 22:11}` is missing
+   |
+note: function defined here
+  --> $DIR/record-args-sugar-errors.rs:22:4
+   |
+LL | fn first(_ { x: u32 = 0 }, y: u32) -> u32 {
+   |    ^^^^^ ----------------
+help: provide the argument
+   |
+LL |     first(/* {record@record-args-sugar-errors.rs:22:10} */, 1);
+   |           +++++++++++++++++++++++++++++++++++++++++++++++++
+
+error: aborting due to 9 previous errors
+
+Some errors have detailed explanations: E0061, E0071.
+For more information about an error, try `rustc --explain E0061`.

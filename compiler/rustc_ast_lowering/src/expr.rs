@@ -501,9 +501,18 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 self.arena.alloc_from_iter(fields.iter().map(|&ident| self.lower_ident(ident))),
             ),
             ExprKind::Struct(se) => {
+                // Named arguments, `f(x: 1)`, are the struct literal `_ { x: 1, .. }`
+                // (`#![feature(struct_args_sugar)]`). The mark lets diagnostics name them.
+                if se.is_named_args {
+                    span = self.mark_span_with_reason(DesugaringKind::NamedArgs, span, None);
+                }
                 let rest = match se.rest {
                     StructRest::Base(ref e) => hir::StructTailExpr::Base(self.lower_expr(e)),
+                    StructRest::Rest(sp) if se.is_named_args => hir::StructTailExpr::DefaultFields(
+                        self.mark_span_with_reason(DesugaringKind::NamedArgs, sp, None),
+                    ),
                     StructRest::Rest(sp) => hir::StructTailExpr::DefaultFields(self.lower_span(sp)),
+                    StructRest::None if se.is_named_args => hir::StructTailExpr::DefaultFields(span),
                     StructRest::None => hir::StructTailExpr::None,
                     StructRest::NoneWithError(guar) => hir::StructTailExpr::NoneWithError(guar),
                 };

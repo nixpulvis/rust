@@ -471,6 +471,16 @@ pub fn check_crate(krate: &ast::Crate, sess: &Session, features: &Features) {
     gate_all!(yeet_expr, "`do yeet` expression is experimental");
     // tidy-alphabetical-end
 
+    // The sugar for record parameters and arguments is on top of `struct_args`, which it needs
+    // as well.
+    for &span in spans.get(&sym::struct_args_sugar).into_flat_iter() {
+        if visitor.features.struct_args_sugar() {
+            gate!(visitor, struct_args, span, "record parameters and arguments are experimental");
+        } else {
+            gate!(visitor, struct_args_sugar, span, "named arguments are experimental");
+        }
+    }
+
     gate_all!(
         async_trait_bounds,
         "`async` trait bounds are unstable",

@@ -267,6 +267,10 @@ declare_features! (
     (internal, staged_api, "1.0.0", None),
     /// Allows record parameters, `fn f(_ { x: u32 })`, and record arguments, `f(_ { x: 1 })`.
     (incomplete, struct_args, "CURRENT_RUSTC_VERSION", None),
+    /// Allows sugar for record parameters and arguments (needs `struct_args`): named arguments,
+    /// `f(a, x: 1)`, leaving out a record argument whose fields all have defaults, `f(a)`, and
+    /// `;` in parameter lists, `fn f(a: u32; x: u32)`.
+    (incomplete, struct_args_sugar, "CURRENT_RUSTC_VERSION", None),
     /// Perma-unstable, only used in the test suite for binders (`for<'a>`).
     (internal, test_binder_constraints, "CURRENT_RUSTC_VERSION", None),
     /// Perma-unstable, only used to test the `incomplete_features` lint.

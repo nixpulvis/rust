@@ -2174,40 +2174,56 @@ impl<'a> Parser<'a> {
         adt_ty: &str,
         ident_span: Span,
         parsed_where: bool,
-        mut bindings: Option<&mut ThinVec<Mutability>>,
+        bindings: Option<&mut ThinVec<Mutability>>,
     ) -> PResult<'a, (ThinVec<FieldDef>, Recovered)> {
-        let mut fields = ThinVec::new();
-        let mut recovered = Recovered::No;
         if self.eat(exp!(OpenBrace)) {
-            while self.token != token::CloseBrace {
-                match self.parse_field_def(adt_ty, ident_span, bindings.as_deref_mut()) {
-                    Ok(field) => {
-                        fields.push(field);
-                    }
-                    Err(mut err) => {
-                        self.consume_block(
-                            exp!(OpenBrace),
-                            exp!(CloseBrace),
-                            ConsumeClosingDelim::No,
-                        );
-                        err.span_label(ident_span, format!("while parsing this {adt_ty}"));
-                        let guar = err.emit_err();
-                        recovered = Recovered::Yes(guar);
-                        break;
-                    }
-                }
-            }
+            let fields = self.parse_field_defs_until(
+                exp!(OpenBrace),
+                exp!(CloseBrace),
+                adt_ty,
+                ident_span,
+                bindings,
+            );
             self.expect(exp!(CloseBrace))?;
+            Ok(fields)
         } else {
             let token_str = super::token_descr(&self.token);
             let where_str = if parsed_where { "" } else { "`where`, or " };
             let msg = format!("expected {where_str}`{{` after struct name, found {token_str}");
             let mut err = self.dcx().struct_span_err(self.token.span, msg);
             err.span_label(self.token.span, format!("expected {where_str}`{{` after struct name",));
-            return Err(err);
+            Err(err)
         }
+    }
 
-        Ok((fields, recovered))
+    /// Parses field declarations up to `close`, which is left unparsed. `open` and `close`
+    /// delimit the fields: braces for a struct, or parentheses for the fields after a `;` in a
+    /// parameter list (see `parse_record_fields` for `bindings`).
+    pub(super) fn parse_field_defs_until(
+        &mut self,
+        open: ExpTokenPair,
+        close: ExpTokenPair,
+        adt_ty: &str,
+        ident_span: Span,
+        mut bindings: Option<&mut ThinVec<Mutability>>,
+    ) -> (ThinVec<FieldDef>, Recovered) {
+        let mut fields = ThinVec::new();
+        let mut recovered = Recovered::No;
+        while self.token != close.tok {
+            match self.parse_field_def(adt_ty, ident_span, bindings.as_deref_mut()) {
+                Ok(field) => {
+                    fields.push(field);
+                }
+                Err(mut err) => {
+                    self.consume_block(open, close, ConsumeClosingDelim::No);
+                    err.span_label(ident_span, format!("while parsing this {adt_ty}"));
+                    let guar = err.emit_err();
+                    recovered = Recovered::Yes(guar);
+                    break;
+                }
+            }
+        }
+        (fields, recovered)
     }
 
     fn parse_unsafe_field(&mut self) -> Safety {
@@ -2403,7 +2419,9 @@ impl<'a> Parser<'a> {
                 err.span_label(ident_span, format!("while parsing this {adt_ty}"));
                 err.emit();
             }
-            token::CloseBrace => {}
+            // The end of the fields after a `;` in a parameter list (see `parse_semi_record_param`).
+            // A `)` can't be the next token inside braces.
+            token::CloseBrace | token::CloseParen => {}
             token::DocComment(..) => {
                 let previous_span = self.prev_token.span;
                 let mut err = diagnostics::DocCommentDoesNotDocumentAnything {

@@ -1,0 +1,15 @@
+error[E0451]: field `secret` of struct `Style` is private
+  --> $DIR/record-args-sugar-privacy.rs:19:10
+   |
+LL |     draw(bold: true);
+   |          ^^^^^^^^^^ field `secret` is private
+
+error[E0451]: field `secret` of struct `Style` is private
+  --> $DIR/record-args-sugar-privacy.rs:21:40
+   |
+LL |     let _ = style::Style { bold: true, .. };
+   |                                        ^^ field `secret` is private
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `rustc --explain E0451`.

@@ -14,7 +14,8 @@ use tracing::debug;
 use super::diagnostics::dummy_arg;
 use super::ty::{AllowPlus, RecoverQPath, RecoverReturnSign};
 use super::{
-    ExpKeywordPair, FollowedByType, ForceCollect, Parser, Recovered, Trailing, UsePreAttrPos,
+    ExpKeywordPair, FollowedByType, ForceCollect, Parser, Recovered, SeqSep, Trailing,
+    UsePreAttrPos,
 };
 use crate::diagnostics::{self, FnPointerCannotBeAsync, FnPointerCannotBeConst};
 use crate::exp;
@@ -195,6 +196,25 @@ impl<'a> Parser<'a> {
         let span = lo.to(self.prev_token.span);
         self.psess.gated_spans.gate(sym::struct_args, span);
         Ok(self.mk_record_param(attrs, binding, lo, span, fields, bindings, recovered))
+    }
+
+    /// Parses the fields after a `;` in a parameter list, `fn f(a: u32; x: u32, y: u32 = 0)`
+    /// (`#![feature(struct_args_sugar)]`), up to the closing `)`. They are sugar for a last
+    /// record parameter, `fn f(a: u32, _ { x: u32, y: u32 = 0 })`.
+    fn parse_semi_record_param(&mut self) -> Param {
+        let lo = self.token.span;
+        self.bump(); // `;`
+        let mut bindings = ThinVec::new();
+        let (fields, recovered) = self.parse_field_defs_until(
+            exp!(OpenParen),
+            exp!(CloseParen),
+            "record parameter",
+            lo,
+            Some(&mut bindings),
+        );
+        let span = lo.to(self.prev_token.span);
+        self.psess.gated_spans.gate(sym::struct_args_sugar, span);
+        self.mk_record_param(AttrVec::new(), None, lo, span, fields, bindings, recovered)
     }
 
     /// Makes a record parameter out of its parsed fields (see `parse_record_param`). `lo` is the
@@ -807,29 +827,49 @@ impl<'a> Parser<'a> {
             return Ok(ThinVec::new());
         }
 
-        let (mut params, _) = self.parse_paren_comma_seq(|p| {
-            p.recover_vcs_conflict_marker();
-            let snapshot = p.create_snapshot_for_diagnostic();
-            let param = p.parse_param_general(fn_parse_mode, first_param).or_else(|e| {
-                let guar = e.emit_err();
-                // When parsing a param failed, we should check to make the span of the param
-                // not contain '(' before it.
-                // For example when parsing `*mut Self` in function `fn oof(*mut Self)`.
-                let lo = if let TokenKind::OpenParen = p.prev_token.kind {
-                    p.prev_token.span.shrink_to_hi()
-                } else {
-                    p.prev_token.span
-                };
-                p.restore_snapshot(snapshot);
-                // Skip every token until next possible arg or end.
-                p.eat_to_tokens(&[exp!(Comma), exp!(CloseParen)]);
-                // Create a placeholder argument for proper arg count (issue #34264).
-                Ok(dummy_arg(Ident::new(sym::dummy, lo.to(p.prev_token.span)), guar))
-            });
-            // ...now that we've parsed the first argument, `self` is no longer allowed.
-            first_param = false;
-            param
-        })?;
+        // Where record parameters are allowed, a `;` starts the fields of a last one (see
+        // `parse_semi_record_param`).
+        let semi_allowed =
+            matches!(fn_parse_mode.context, FnContext::Free | FnContext::Impl | FnContext::Trait);
+        let closes_not_expected: &[&TokenKind] = if semi_allowed { &[&token::Semi] } else { &[] };
+        self.expect(exp!(OpenParen))?;
+        let (mut params, _, recovered) = self.parse_seq_to_before_tokens(
+            &[exp!(CloseParen)],
+            closes_not_expected,
+            SeqSep::trailing_allowed(exp!(Comma)),
+            |p| {
+                p.recover_vcs_conflict_marker();
+                let snapshot = p.create_snapshot_for_diagnostic();
+                let param = p.parse_param_general(fn_parse_mode, first_param).or_else(|e| {
+                    let guar = e.emit_err();
+                    // When parsing a param failed, we should check to make the span of the param
+                    // not contain '(' before it.
+                    // For example when parsing `*mut Self` in function `fn oof(*mut Self)`.
+                    let lo = if let TokenKind::OpenParen = p.prev_token.kind {
+                        p.prev_token.span.shrink_to_hi()
+                    } else {
+                        p.prev_token.span
+                    };
+                    p.restore_snapshot(snapshot);
+                    // Skip every token until next possible arg or end.
+                    p.eat_to_tokens(&[exp!(Comma), exp!(CloseParen)]);
+                    // Create a placeholder argument for proper arg count (issue #34264).
+                    Ok(dummy_arg(Ident::new(sym::dummy, lo.to(p.prev_token.span)), guar))
+                });
+                // ...now that we've parsed the first argument, `self` is no longer allowed.
+                first_param = false;
+                param
+            },
+        )?;
+        if semi_allowed && self.token == token::Semi {
+            params.push(self.parse_semi_record_param());
+        }
+        if matches!(recovered, Recovered::No) && !self.eat(exp!(CloseParen)) {
+            self.dcx().span_delayed_bug(
+                self.token.span,
+                "recovered but `parse_seq_to_before_tokens` did not give us the close token",
+            );
+        }
         // Replace duplicated recovered params with `_` pattern to avoid unnecessary errors.
         self.deduplicate_recovered_params_names(&mut params);
         Ok(params)

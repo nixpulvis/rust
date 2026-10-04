@@ -2099,6 +2099,7 @@ symbols! {
         string_deref_patterns,
         stringify,
         struct_args,
+        struct_args_sugar,
         struct_field_attributes,
         struct_inherit,
         struct_variant,

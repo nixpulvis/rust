@@ -154,6 +154,11 @@ pub struct TypeckResults<'tcx> {
     /// MIR construction and hence is not serialized to metadata.
     fru_field_types: ItemLocalMap<Vec<Ty<'tcx>>>,
 
+    /// For each call that leaves out its record argument (`#![feature(struct_args_sugar)]`), the
+    /// type of the record, all of whose fields take their defaults: `f()` for
+    /// `fn f(_ { a: u32 = 0 })`. Used only in MIR construction.
+    omitted_record_args: ItemLocalMap<Ty<'tcx>>,
+
     /// For every coercion cast we add the HIR node ID of the cast
     /// expression to this set.
     coercion_casts: ItemLocalSet,
@@ -249,6 +254,7 @@ impl<'tcx> TypeckResults<'tcx> {
             closure_kind_origins: Default::default(),
             liberated_fn_sigs: Default::default(),
             fru_field_types: Default::default(),
+            omitted_record_args: Default::default(),
             coercion_casts: Default::default(),
             used_trait_imports: Default::default(),
             tainted_by_errors: None,
@@ -572,6 +578,14 @@ impl<'tcx> TypeckResults<'tcx> {
 
     pub fn fru_field_types_mut(&mut self) -> LocalTableInContextMut<'_, Vec<Ty<'tcx>>> {
         LocalTableInContextMut { hir_owner: self.hir_owner, data: &mut self.fru_field_types }
+    }
+
+    pub fn omitted_record_args(&self) -> LocalTableInContext<'_, Ty<'tcx>> {
+        LocalTableInContext { hir_owner: self.hir_owner, data: &self.omitted_record_args }
+    }
+
+    pub fn omitted_record_args_mut(&mut self) -> LocalTableInContextMut<'_, Ty<'tcx>> {
+        LocalTableInContextMut { hir_owner: self.hir_owner, data: &mut self.omitted_record_args }
     }
 
     pub fn is_coercion_cast(&self, hir_id: HirId) -> bool {

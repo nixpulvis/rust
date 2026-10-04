@@ -2866,7 +2866,14 @@ fn rewrite_params(
     span: Span,
     variadic: bool,
 ) -> RewriteResult {
-    if params.is_empty() {
+    // A `;` in the parameter list starts the fields of a last record parameter
+    // (`#![feature(struct_args_sugar)]`), so the list isn't comma-separated, and is kept as
+    // written.
+    let has_semi_record = params.last().is_some_and(|param| {
+        matches!(param.ty.kind, ast::TyKind::Record(..))
+            && context.snippet(param.span).starts_with(';')
+    });
+    if params.is_empty() || has_semi_record {
         let comment = context
             .snippet(mk_sp(
                 span.lo(),

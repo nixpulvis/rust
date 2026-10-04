@@ -6,5 +6,6 @@ enum Test {
 
 fn main() {
     Test::Drill(field: 42);
-    //~^ ERROR invalid `struct` delimiters or `fn` call arguments
+    //~^ ERROR named arguments are experimental
+    //~| ERROR expected value, found struct variant `Test::Drill`
 }

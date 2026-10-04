@@ -25,6 +25,7 @@ use rustc_middle::ty::print::with_forced_trimmed_paths;
 use rustc_middle::ty::relate::{Relate, RelateResult, TypeRelation};
 use rustc_middle::ty::{self, IsSuggestable, Ty, TyCtxt, TypeVisitableExt, Unnormalized};
 use rustc_session::Session;
+use rustc_session::diagnostics::feature_err;
 use rustc_span::{DUMMY_SP, Ident, Span, bug, kw, span_bug, sym};
 use rustc_trait_selection::error_reporting::infer::{FailureCode, ObligationCauseExt};
 use rustc_trait_selection::infer::InferCtxtExt;
@@ -345,12 +346,42 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
 
         // If there are no external expectations at the call site, just use the types from the function defn
-        let expected_input_tys = if let Some(expected_input_tys) = expected_input_tys {
+        let mut expected_input_tys = if let Some(expected_input_tys) = expected_input_tys {
             assert_eq!(expected_input_tys.len(), formal_input_tys.len());
             expected_input_tys
         } else {
             formal_input_tys.clone()
         };
+
+        // A call may leave out a last record parameter whose fields all have defaults: `f()` for
+        // `fn f(_ { a: u32 = 0 })` is `f(_ { .. })` (`#![feature(struct_args_sugar)]`). The record
+        // is built when lowering to THIR.
+        if !c_variadic
+            && !tuple_arguments.is_tupled()
+            && provided_args.len() + 1 == formal_input_tys.len()
+            && let Some(record_ty) = self.omittable_record(*formal_input_tys.last().unwrap())
+        {
+            if !self.tcx.features().struct_args_sugar() {
+                feature_err(
+                    &self.tcx.sess,
+                    sym::struct_args_sugar,
+                    call_span,
+                    "leaving out a record argument is experimental",
+                )
+                .emit();
+            }
+            self.register_wf_obligation(
+                record_ty.into(),
+                call_span,
+                ObligationCauseCode::WellFormed(None),
+            );
+            self.typeck_results
+                .borrow_mut()
+                .omitted_record_args_mut()
+                .insert(call_expr.hir_id, record_ty);
+            formal_input_tys.pop();
+            expected_input_tys.pop();
+        }
 
         let minimum_input_count = expected_input_tys.len();
         let provided_arg_count = provided_args.len();
@@ -586,6 +617,18 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 tuple_arguments,
             );
         }
+    }
+
+    /// The type of a record parameter that a call may leave out, because every field of the
+    /// record has a default. Only anonymous records, not named structs: `v.push()` mustn't build
+    /// a default element, and adding field defaults to a named struct mustn't change which calls
+    /// compile.
+    fn omittable_record(&self, ty: Ty<'tcx>) -> Option<Ty<'tcx>> {
+        let ty = self.shallow_resolve(ty);
+        let ty::Adt(adt, _) = ty.kind() else { return None };
+        (self.tcx.is_record(adt.did())
+            && adt.non_enum_variant().fields.iter().all(|field| field.value.is_some()))
+        .then_some(ty)
     }
 
     /// Check arguments that are tupled by "rust-call" or `#[rustc_splat]`.

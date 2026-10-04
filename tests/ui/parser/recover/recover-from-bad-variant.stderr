@@ -1,22 +1,26 @@
-error: invalid `struct` delimiters or `fn` call arguments
+error[E0658]: named arguments are experimental
+  --> $DIR/recover-from-bad-variant.rs:7:23
+   |
+LL |     let x = Enum::Foo(a: 3, b: 4);
+   |                       ^^^^^^^^^^
+   |
+   = help: add `#![feature(struct_args_sugar)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error[E0533]: expected value, found struct variant `Enum::Foo`
   --> $DIR/recover-from-bad-variant.rs:7:13
    |
 LL |     let x = Enum::Foo(a: 3, b: 4);
-   |             ^^^^^^^^^^^^^^^^^^^^^
+   |             ^^^^^^^^^ not a value
    |
-help: if `Enum::Foo` is a struct, use braces as delimiters
-   |
-LL -     let x = Enum::Foo(a: 3, b: 4);
-LL +     let x = Enum::Foo { a: 3, b: 4 };
-   |
-help: if `Enum::Foo` is a function, use the arguments directly
+help: you might have meant to create a new value of the struct
    |
 LL -     let x = Enum::Foo(a: 3, b: 4);
-LL +     let x = Enum::Foo(3, 4);
+LL +     let x = Enum::Foo { a: /* value */, b: /* value */ };
    |
 
 error[E0164]: expected tuple struct or tuple variant, found struct variant `Enum::Foo`
-  --> $DIR/recover-from-bad-variant.rs:10:9
+  --> $DIR/recover-from-bad-variant.rs:11:9
    |
 LL |         Enum::Foo(a, b) => {}
    |         ^^^^^^^^^^^^^^^ not a tuple struct or tuple variant
@@ -28,7 +32,7 @@ LL +         Enum::Foo { a, b } => {}
    |
 
 error[E0164]: expected tuple struct or tuple variant, found struct variant `Enum::Foo`
-  --> $DIR/recover-from-bad-variant.rs:12:9
+  --> $DIR/recover-from-bad-variant.rs:13:9
    |
 LL |         Enum::Foo(x, y) => {}
    |         ^^^^^^^^^^^^^^^ not a tuple struct or tuple variant
@@ -40,7 +44,7 @@ LL +         Enum::Foo { a: x, b: y } => {}
    |
 
 error[E0164]: expected tuple struct or tuple variant, found struct variant `Enum::Foo`
-  --> $DIR/recover-from-bad-variant.rs:14:9
+  --> $DIR/recover-from-bad-variant.rs:15:9
    |
 LL |         Enum::Foo(1 | 2, b @ 3) => {}
    |         ^^^^^^^^^^^^^^^^^^^^^^^ not a tuple struct or tuple variant
@@ -52,7 +56,7 @@ LL +         Enum::Foo { a: 1 | 2, b: b @ 3 } => {}
    |
 
 error[E0164]: expected tuple struct or tuple variant, found struct variant `Enum::Foo`
-  --> $DIR/recover-from-bad-variant.rs:16:9
+  --> $DIR/recover-from-bad-variant.rs:17:9
    |
 LL |         Enum::Foo(a) => {}
    |         ^^^^^^^^^^^^ not a tuple struct or tuple variant
@@ -64,7 +68,7 @@ LL +         Enum::Foo { a, b: _ } => {}
    |
 
 error[E0164]: expected tuple struct or tuple variant, found struct variant `Enum::Foo`
-  --> $DIR/recover-from-bad-variant.rs:18:9
+  --> $DIR/recover-from-bad-variant.rs:19:9
    |
 LL |         Enum::Foo(a, b, c) => {}
    |         ^^^^^^^^^^^^^^^^^^ not a tuple struct or tuple variant
@@ -76,7 +80,7 @@ LL +         Enum::Foo { a, b } => {}
    |
 
 error[E0769]: tuple variant `Enum::Bar` written as struct variant
-  --> $DIR/recover-from-bad-variant.rs:20:9
+  --> $DIR/recover-from-bad-variant.rs:21:9
    |
 LL |         Enum::Bar { a, b } => {}
    |         ^^^^^^^^^^^^^^^^^^
@@ -87,7 +91,7 @@ LL -         Enum::Bar { a, b } => {}
 LL +         Enum::Bar(a, b) => {}
    |
 
-error: aborting due to 7 previous errors
+error: aborting due to 8 previous errors
 
-Some errors have detailed explanations: E0164, E0769.
+Some errors have detailed explanations: E0164, E0533, E0658, E0769.
 For more information about an error, try `rustc --explain E0164`.

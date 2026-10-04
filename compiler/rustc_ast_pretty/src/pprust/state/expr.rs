@@ -145,16 +145,29 @@ impl<'a> State<'a> {
         self.end(ib);
     }
 
-    fn print_expr_struct(
-        &mut self,
-        qself: &Option<Box<ast::QSelf>>,
-        path: &ast::Path,
-        fields: &[ast::ExprField],
-        rest: &ast::StructRest,
-    ) {
+    fn print_expr_struct(&mut self, se: &ast::StructExpr) {
+        let ast::StructExpr { qself, path, fields, rest, is_named_args } = se;
         // An inferred struct literal, `_ { .. }` (`#![feature(struct_args)]`), is `<_>::_ { .. }`.
         let is_inferred = matches!(qself, Some(qself) if matches!(qself.ty.kind, ast::TyKind::Infer))
             && matches!(&path.segments[..], [segment] if segment.ident.name == rustc_span::kw::Underscore);
+        // Named arguments, `f(x: 1, ..)` (`#![feature(struct_args_sugar)]`), print as written.
+        if *is_named_args {
+            self.commasep(Inconsistent, fields, |s, field| {
+                s.print_ident(field.ident);
+                s.word_nbsp(":");
+                s.print_expr(&field.expr, FixupContext::default());
+            });
+            if let ast::StructRest::Base(_) | ast::StructRest::Rest(_) = rest {
+                if !fields.is_empty() {
+                    self.word_space(",");
+                }
+                self.word("..");
+                if let ast::StructRest::Base(expr) = rest {
+                    self.print_expr(expr, FixupContext::default());
+                }
+            }
+            return;
+        }
         if is_inferred {
             self.word("_");
         } else if let Some(qself) = qself {
@@ -460,7 +473,7 @@ impl<'a> State<'a> {
                 self.print_expr_repeat(element, count);
             }
             ast::ExprKind::Struct(se) => {
-                self.print_expr_struct(&se.qself, &se.path, &se.fields, &se.rest);
+                self.print_expr_struct(se);
             }
             ast::ExprKind::Tup(exprs) => {
                 self.print_expr_tup(exprs);

@@ -409,12 +409,14 @@ impl<'tcx> ThirBuildCx<'tcx> {
                     )
                 } else {
                     // Rewrite a.b(c) into UFCS form like Trait::b(a, c)
+                    let omitted_record = self.omitted_record_arg(expr);
                     let expr = self.method_callee(expr, segment.ident.span, None);
                     info!("Using method span: {:?}", expr.span);
 
                     let args = std::iter::once(receiver)
                         .chain(args.iter())
                         .map(|expr| self.mirror_expr(expr))
+                        .chain(omitted_record)
                         .collect();
                     ExprKind::Call {
                         ty: expr.ty,
@@ -517,10 +519,16 @@ impl<'tcx> ThirBuildCx<'tcx> {
                             base: AdtExprBase::None,
                         }))
                     } else {
+                        let omitted_record = self.omitted_record_arg(expr);
+                        let args = args
+                            .iter()
+                            .map(|expr| self.mirror_expr(expr))
+                            .chain(omitted_record)
+                            .collect();
                         ExprKind::Call {
                             ty: self.typeck_results.node_type(fun.hir_id),
                             fun: self.mirror_expr(fun),
-                            args: self.mirror_exprs(args),
+                            args,
                             from_hir_call: true,
                             fn_span: expr.span,
                         }
@@ -1233,6 +1241,35 @@ impl<'tcx> ThirBuildCx<'tcx> {
         };
         debug!("user_args_applied_to_res: user_provided_type={:?}", user_provided_type);
         user_provided_type
+    }
+
+    /// The record argument a call left out (see `omitted_record_args`), built as `_ { .. }`.
+    fn omitted_record_arg(&mut self, call: &hir::Expr<'_>) -> Option<ExprId> {
+        let ty = *self.typeck_results.omitted_record_args().get(call.hir_id)?;
+        let &ty::Adt(adt_def, args) = ty.kind() else {
+            span_bug!(call.span, "omitted record argument of type {ty}");
+        };
+        let (tcx, typing_env) = (self.tcx, self.typing_env);
+        let field_tys = adt_def
+            .non_enum_variant()
+            .fields
+            .iter()
+            .map(|field| tcx.normalize_erasing_regions(typing_env, field.ty(tcx, args)))
+            .collect();
+        let kind = ExprKind::Adt(Box::new(AdtExpr {
+            adt_def,
+            variant_index: FIRST_VARIANT,
+            args,
+            fields: Box::new([]),
+            user_ty: None,
+            base: AdtExprBase::DefaultFields(field_tys),
+        }));
+        Some(self.thir.exprs.push(Expr {
+            temp_scope_id: call.hir_id.local_id,
+            ty,
+            span: call.span.shrink_to_hi(),
+            kind,
+        }))
     }
 
     fn method_callee(

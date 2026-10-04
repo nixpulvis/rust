@@ -1,0 +1,30 @@
+error[E0658]: named arguments are experimental
+  --> $DIR/feature-gate-struct_args_sugar.rs:9:12
+   |
+LL | fn g(a: u32; y: u32) -> u32 {
+   |            ^^^^^^^^
+   |
+   = help: add `#![feature(struct_args_sugar)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error[E0658]: named arguments are experimental
+  --> $DIR/feature-gate-struct_args_sugar.rs:14:7
+   |
+LL |     f(x: 1);
+   |       ^^^^
+   |
+   = help: add `#![feature(struct_args_sugar)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error[E0658]: leaving out a record argument is experimental
+  --> $DIR/feature-gate-struct_args_sugar.rs:15:5
+   |
+LL |     f();
+   |     ^^^
+   |
+   = help: add `#![feature(struct_args_sugar)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0658`.
