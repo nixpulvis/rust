@@ -436,6 +436,13 @@ fn literal_to_string(lit: tk::Lit) -> String {
     out
 }
 
+/// Whether `qself` and `path` are the inferred path `<_>::_` of a struct literal or pattern
+/// written `_ { .. }` (`#![feature(struct_args)]`).
+fn is_inferred_struct_path(qself: &Option<Box<ast::QSelf>>, path: &ast::Path) -> bool {
+    matches!(qself, Some(qself) if matches!(qself.ty.kind, ast::TyKind::Infer))
+        && matches!(&path.segments[..], [segment] if segment.ident.name == kw::Underscore)
+}
+
 impl std::ops::Deref for State<'_> {
     type Target = pp::Printer;
     fn deref(&self) -> &Self::Target {
@@ -1466,8 +1473,35 @@ impl<'a> State<'a> {
                 self.print_expr(expr, FixupContext::default());
                 self.pclose();
             }
+            ast::TyKind::Record(record) => self.print_record(record),
         }
         self.end(ib);
+    }
+
+    /// Prints an anonymous struct, `struct { x: u32, y: u32 = 0 }`.
+    fn print_record(&mut self, record: &ast::RecordTy) {
+        self.word_nbsp("struct");
+        self.word("{");
+        if record.fields.is_empty() {
+            self.word("}");
+            return;
+        }
+        self.nbsp();
+        self.commasep(Inconsistent, &record.fields, |s, field| {
+            s.print_outer_attributes(&field.attrs);
+            if let Some(ident) = field.ident {
+                s.print_ident(ident);
+                s.word_nbsp(":");
+            }
+            s.print_type(&field.ty);
+            if let Some(default) = field.default_value() {
+                s.space();
+                s.word_space("=");
+                s.print_expr(&default.value, FixupContext::default());
+            }
+        });
+        self.nbsp();
+        self.word("}");
     }
 
     fn print_trait_ref(&mut self, t: &ast::TraitRef) {
@@ -1962,7 +1996,9 @@ impl<'a> State<'a> {
                 self.print_qpath(path, qself, false);
             }
             PatKind::Struct(qself, path, fields, etc) => {
-                if let Some(qself) = qself {
+                if is_inferred_struct_path(qself, path) {
+                    self.word("_");
+                } else if let Some(qself) = qself {
                     self.print_qpath(path, qself, true);
                 } else {
                     self.print_path(path, true, 0);

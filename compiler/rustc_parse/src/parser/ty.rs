@@ -313,6 +313,19 @@ impl<'a> Parser<'a> {
         } else if self.eat_keyword(exp!(Underscore)) {
             // A type to be inferred `_`
             TyKind::Infer
+        } else if self.is_record_ty_start() {
+            // An anonymous struct, `struct { .. }`, outside of the places that parse it on their
+            // own (see `parse_record_ty`). Parse it to recover.
+            let ty = self.parse_record_ty()?;
+            TyKind::Err(
+                self.dcx()
+                    .struct_span_err(
+                        ty.span,
+                        "anonymous structs are only allowed as parameter types",
+                    )
+                    .with_span_label(ty.span, "not allowed here")
+                    .emit_err(),
+            )
         } else if self.check_fn_front_matter(false, Case::Sensitive) {
             // Function pointer type
             self.parse_ty_fn_ptr(lo, ThinVec::new(), None, recover_return_sign)?

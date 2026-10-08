@@ -12,6 +12,7 @@ use thin_vec::ThinVec;
 use tracing::debug;
 
 use super::diagnostics::dummy_arg;
+use super::item::RECORD_ADT;
 use super::ty::{AllowPlus, RecoverQPath, RecoverReturnSign};
 use super::{
     ExpKeywordPair, FollowedByType, ForceCollect, Parser, Recovered, Trailing, UsePreAttrPos,
@@ -125,19 +126,19 @@ impl<'a> Parser<'a> {
         let header = self.parse_fn_front_matter(vis, case, FrontMatterParsingMode::Function)?; // `const ... fn`
         let ident = self.parse_ident()?; // `foo`
         let mut generics = self.parse_generics()?; // `<'a, T, ...>`
-        let decl = match self.parse_fn_decl(&fn_parse_mode, AllowPlus::Yes, RecoverReturnSign::Yes)
-        {
-            Ok(decl) => decl,
-            Err(old_err) => {
-                // If we see `for Ty ...` then user probably meant `impl` item.
-                if self.token.is_keyword(kw::For) {
-                    old_err.cancel();
-                    return Err(self.dcx().create_err(diagnostics::FnTypoWithImpl { fn_span }));
-                } else {
-                    return Err(old_err);
+        let mut decl =
+            match self.parse_fn_decl(&fn_parse_mode, AllowPlus::Yes, RecoverReturnSign::Yes) {
+                Ok(decl) => decl,
+                Err(old_err) => {
+                    // If we see `for Ty ...` then user probably meant `impl` item.
+                    if self.token.is_keyword(kw::For) {
+                        old_err.cancel();
+                        return Err(self.dcx().create_err(diagnostics::FnTypoWithImpl { fn_span }));
+                    } else {
+                        return Err(old_err);
+                    }
                 }
-            }
-        };
+            };
 
         // Store the end of function parameters to give better diagnostics
         // inside `parse_fn_body()`.
@@ -156,7 +157,54 @@ impl<'a> Parser<'a> {
         let body =
             self.parse_fn_body(attrs, &ident, &mut sig_hi, fn_parse_mode.req_body, fn_params_end)?;
         let fn_sig_span = sig_lo.to(sig_hi);
+        Self::set_record_visibility(&mut decl, vis);
         Ok((ident, FnSig { header, decl, span: fn_sig_span }, generics, contract, body))
+    }
+
+    /// Whether the next tokens start an anonymous struct type, `struct { .. }`.
+    pub(super) fn is_record_ty_start(&self) -> bool {
+        self.token.is_keyword(kw::Struct) && self.look_ahead(1, |t| *t == token::OpenBrace)
+    }
+
+    /// Parses an anonymous struct type, `struct { x: u32, y: u32 = 0 }` (see `TyKind::Record`).
+    pub(super) fn parse_record_ty(&mut self) -> PResult<'a, Box<Ty>> {
+        let lo = self.token.span;
+        self.bump(); // `struct`
+        let (fields, recovered) = self.parse_record_struct_body(RECORD_ADT, lo, true)?;
+        let span = lo.to(self.prev_token.span);
+        self.psess.gated_spans.gate(sym::struct_args, span);
+        Ok(self.mk_record_ty(lo, span, fields, recovered))
+    }
+
+    /// Makes an anonymous struct type out of its parsed fields. `lo` is the span of the token
+    /// that starts it, and `span` that of the type.
+    fn mk_record_ty(
+        &mut self,
+        lo: Span,
+        span: Span,
+        fields: ThinVec<FieldDef>,
+        recovered: Recovered,
+    ) -> Box<Ty> {
+        let vis = Visibility { kind: VisibilityKind::Inherited, span: lo.shrink_to_lo() };
+        let record = RecordTy { id: DUMMY_NODE_ID, vis, fields, recovered, ident_span: lo };
+        self.mk_ty(span, TyKind::Record(Box::new(record)))
+    }
+
+    /// Gives the anonymous structs of a function's parameters, and those of their fields, the
+    /// function's visibility, or, for a method in a trait, the trait's.
+    pub(super) fn set_record_visibility(decl: &mut FnDecl, vis: &Visibility) {
+        fn set(ty: &mut Ty, vis: &Visibility) {
+            if let TyKind::Record(record) = &mut ty.kind {
+                record.vis = vis.clone();
+                for field in &mut record.fields {
+                    field.vis = vis.clone();
+                    set(&mut field.ty, vis);
+                }
+            }
+        }
+        for param in &mut decl.inputs {
+            set(&mut param.ty, vis);
+        }
     }
 
     /// Provide diagnostics when function body is not found
@@ -743,6 +791,13 @@ impl<'a> Parser<'a> {
                 return Ok((res?, Trailing::No, UsePreAttrPos::No));
             }
 
+            // Anonymous struct parameters are only for functions, not for function pointer types
+            // or `Fn(..)` bounds.
+            let is_fn_item = matches!(
+                fn_parse_mode.context,
+                FnContext::Free | FnContext::Impl | FnContext::Trait
+            );
+
             let is_dot_dot_dot = if this.token.kind == token::DotDotDot {
                 IsDotDotDot::Yes
             } else {
@@ -766,26 +821,30 @@ impl<'a> Parser<'a> {
             let (pat, ty) = if is_name_required || this.is_named_param() {
                 debug!("parse_param_general parse_pat (is_name_required:{})", is_name_required);
                 let (pat, colon) = this.parse_fn_param_pat_colon()?;
-                if !colon {
-                    let mut err = this.unexpected().unwrap_err();
-                    let pat_span = pat.span;
-                    return if let Some(ident) = this.parameter_without_type(
-                        &mut err,
-                        pat,
-                        is_name_required,
-                        first_param,
-                        fn_parse_mode,
-                    ) {
-                        let guar = err.emit_err();
-                        let mut arg = dummy_arg(ident, guar);
-                        arg.span = pat_span;
-                        Ok((arg, Trailing::No, UsePreAttrPos::No))
-                    } else {
-                        Err(err)
-                    };
+                // `p: struct { .. }` is an ordinary `pat: ty`, which only binds `p`.
+                if colon && is_fn_item && this.is_record_ty_start() {
+                    (pat, this.parse_record_ty()?)
+                } else {
+                    if !colon {
+                        let mut err = this.unexpected().unwrap_err();
+                        let pat_span = pat.span;
+                        return if let Some(ident) = this.parameter_without_type(
+                            &mut err,
+                            pat,
+                            is_name_required,
+                            first_param,
+                            fn_parse_mode,
+                        ) {
+                            let guar = err.emit_err();
+                            let mut arg = dummy_arg(ident, guar);
+                            arg.span = pat_span;
+                            Ok((arg, Trailing::No, UsePreAttrPos::No))
+                        } else {
+                            Err(err)
+                        };
+                    }
+                    (pat, this.parse_ty_for_param()?)
                 }
-
-                (pat, this.parse_ty_for_param()?)
             } else {
                 debug!("parse_param_general ident_to_pat");
                 let parser_snapshot_before_ty = this.create_snapshot_for_diagnostic();

@@ -1,26 +1,21 @@
-error: placeholder `_` is not allowed for the path in struct literals
+error[E0658]: record parameters and arguments are experimental
   --> $DIR/struct-lit-placeholder-path.rs:9:20
    |
 LL |     blah::do_stuff(_ { x: 10 });
-   |                    ^ not allowed in struct literals
+   |                    ^^^^^^^^^^^
    |
-help: replace it with the correct type
-   |
-LL -     blah::do_stuff(_ { x: 10 });
-LL +     blah::do_stuff(/* Type */ { x: 10 });
-   |
+   = help: add `#![feature(struct_args)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
 
-error: placeholder `_` is not allowed for the path in struct literals
-  --> $DIR/struct-lit-placeholder-path.rs:17:20
+error[E0658]: record parameters and arguments are experimental
+  --> $DIR/struct-lit-placeholder-path.rs:15:20
    |
 LL |     blah::do_stuff(_ { x: 10 });
-   |                    ^ not allowed in struct literals
+   |                    ^^^^^^^^^^^
    |
-help: replace it with the correct type
-   |
-LL -     blah::do_stuff(_ { x: 10 });
-LL +     blah::do_stuff(/* Type */ { x: 10 });
-   |
+   = help: add `#![feature(struct_args)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
 
 error: aborting due to 2 previous errors
 
+For more information about this error, try `rustc --explain E0658`.

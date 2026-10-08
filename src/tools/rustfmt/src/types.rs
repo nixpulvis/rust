@@ -1050,7 +1050,11 @@ impl Rewrite for ast::Ty {
                 // Also, rustfmt might get passed the output from `-Zunpretty=expanded`.
                 Err(RewriteError::Unknown)
             }
-            ast::TyKind::Dummy | ast::TyKind::Err(_) => Ok(context.snippet(self.span).to_owned()),
+            // A record parameter's anonymous struct (`#![feature(struct_args)]`) is kept as
+            // written.
+            ast::TyKind::Record(..) | ast::TyKind::Dummy | ast::TyKind::Err(_) => {
+                Ok(context.snippet(self.span).to_owned())
+            }
         }
     }
 }

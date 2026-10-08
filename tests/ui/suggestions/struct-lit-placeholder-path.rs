@@ -7,15 +7,11 @@ mod blah {
 
 fn main() {
     blah::do_stuff(_ { x: 10 });
-    //~^ ERROR placeholder `_` is not allowed for the path in struct literals
-    //~| NOTE not allowed in struct literals
-    //~| HELP replace it with the correct type
+    //~^ ERROR record parameters and arguments are experimental
 }
 
 #[cfg(FALSE)]
 fn disabled() {
     blah::do_stuff(_ { x: 10 });
-    //~^ ERROR placeholder `_` is not allowed for the path in struct literals
-    //~| NOTE not allowed in struct literals
-    //~| HELP replace it with the correct type
+    //~^ ERROR record parameters and arguments are experimental
 }

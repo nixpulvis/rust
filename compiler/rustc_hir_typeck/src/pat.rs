@@ -37,6 +37,16 @@ use crate::expectation::Expectation;
 use crate::gather_locals::DeclOrigin;
 use crate::{FnCtxt, diagnostics};
 
+/// Whether `qpath` is that of a struct pattern with an inferred path, `<_>::_ { x, y }`, written
+/// `_ { x, y }` (`#![feature(struct_args)]`), whose struct is its expected type.
+fn is_inferred_pat_path(qpath: &hir::QPath<'_>) -> bool {
+    matches!(
+        qpath,
+        hir::QPath::TypeRelative(hir::Ty { kind: hir::TyKind::Infer(_), .. }, segment)
+            if segment.ident.name == kw::Underscore
+    )
+}
+
 const CANNOT_IMPLICITLY_DEREF_POINTER_TRAIT_OBJ: &str = "\
 This error indicates that a pointer to a trait type cannot be implicitly dereferenced by a \
 pattern. Every trait defines a type, but because the size of trait implementors isn't fixed, \
@@ -410,7 +420,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             PatKind::Expr(PatExpr { kind: PatExprKind::Path(qpath), hir_id, span }) => {
                 Some(self.resolve_pat_path(*hir_id, *span, qpath))
             }
-            PatKind::Struct(ref qpath, ..) => Some(self.resolve_pat_struct(pat, qpath)),
+            PatKind::Struct(ref qpath, ..) => Some(self.resolve_pat_struct(pat, qpath, expected)),
             PatKind::TupleStruct(ref qpath, ..) => Some(self.resolve_pat_tuple_struct(pat, qpath)),
             _ => None,
         };
@@ -1521,7 +1531,32 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         &self,
         pat: &'tcx Pat<'tcx>,
         qpath: &hir::QPath<'tcx>,
+        expected: Ty<'tcx>,
     ) -> Result<ResolvedPat<'tcx>, ErrorGuaranteed> {
+        // A struct pattern with an inferred path takes its struct from the expected type, under any
+        // references that default binding modes will match through.
+        if is_inferred_pat_path(qpath) {
+            let mut ty = self.structurally_resolve_type(pat.span, expected);
+            while let ty::Ref(_, inner, _) = *ty.kind() {
+                ty = self.structurally_resolve_type(pat.span, inner);
+            }
+            return match *ty.kind() {
+                ty::Adt(adt, _) if adt.is_struct() => {
+                    self.write_resolution(pat.hir_id, Ok((DefKind::Struct, adt.did())));
+                    let variant = adt.non_enum_variant();
+                    Ok(ResolvedPat { ty, kind: ResolvedPatKind::Struct { variant } })
+                }
+                ty::Error(guar) => Err(guar),
+                _ => Err(struct_span_code_err!(
+                    self.dcx(),
+                    pat.span,
+                    E0071,
+                    "expected struct, found {}",
+                    ty.sort_string(self.tcx)
+                )
+                .emit_err()),
+            };
+        }
         // Resolve the path and check the definition for errors.
         let (variant, pat_ty) = self.check_struct_path(qpath, pat.hir_id)?;
         Ok(ResolvedPat { ty: pat_ty, kind: ResolvedPatKind::Struct { variant } })
@@ -2148,6 +2183,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             .map(|field| (field, field.ident(self.tcx).normalize_to_macros_2_0()))
             .filter(|(_, ident)| !used_fields.contains_key(ident))
             .collect::<Vec<_>>();
+
+        // In a trait impl, the type of a parameter's anonymous struct (`#![feature(struct_args)]`)
+        // is the trait method's, and `compare_impl_item` reports the impl's fields that differ from
+        // it, which a pattern of the impl's fields also differs in.
+        if (!inexistent_fields.is_empty() || !unmentioned_fields.is_empty())
+            && tcx.is_record(adt.did())
+            && let root = tcx.typeck_root_def_id(self.body_def_id.to_def_id())
+            && tcx.record_function(adt.did()) != root
+            && tcx.trait_item_of(root).is_some()
+            && let Err(guar) = tcx.compare_impl_item(root.expect_local())
+        {
+            return Err(guar);
+        }
 
         let inexistent_fields_err = if !inexistent_fields.is_empty()
             && !inexistent_fields.iter().any(|field| field.ident.name == kw::Underscore)

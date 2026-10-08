@@ -903,6 +903,14 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for IllegalSelfTypeVisitor<'tcx> {
                     AllowSelfProjections::No => ty.super_visit_with(self),
                 }
             }
+            // A record (`#![feature(struct_args)]`) has its method's generics, so its arguments
+            // include `Self`, which only matters if a field uses it.
+            ty::Adt(adt, args) if self.tcx.is_record(adt.did()) => {
+                for field in adt.all_fields() {
+                    self.visit_ty(field.ty(self.tcx, args).skip_norm_wip())?;
+                }
+                ControlFlow::Continue(())
+            }
             _ => ty.super_visit_with(self),
         }
     }

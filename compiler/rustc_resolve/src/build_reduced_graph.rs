@@ -489,7 +489,7 @@ impl<'a, 'ra, 'tcx> DefCollector<'a, 'ra, 'tcx> {
         Res::Def(self.r.tcx.def_kind(def_id), def_id)
     }
 
-    fn resolve_visibility(&mut self, vis: &ast::Visibility) -> Visibility {
+    pub(crate) fn resolve_visibility(&mut self, vis: &ast::Visibility) -> Visibility {
         match self.r.try_resolve_visibility(&self.parent_scope, vis, false) {
             Ok(vis) => vis,
             Err(error) => {

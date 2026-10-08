@@ -551,6 +551,7 @@ macro_rules! common_visitor_and_walkers {
             RangeEnd,
             RangeLimits,
             RangeSyntax,
+            RecordTy,
             Recovered,
             RestrictionKind,
             Safety,

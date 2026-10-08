@@ -89,7 +89,8 @@ fn check_representability_adt_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) {
 fn params_in_repr(tcx: TyCtxt<'_>, def_id: LocalDefId) -> DenseBitSet<u32> {
     let adt_def = tcx.adt_def(def_id);
     let generics = tcx.generics_of(def_id);
-    let mut params_in_repr = DenseBitSet::new_empty(generics.own_params.len());
+    // All of the parameters, as a record (`#![feature(struct_args)]`) has its function's.
+    let mut params_in_repr = DenseBitSet::new_empty(generics.count());
     for variant in adt_def.variants() {
         for field in variant.fields.iter() {
             params_in_repr_ty(

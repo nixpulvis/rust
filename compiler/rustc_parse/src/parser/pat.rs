@@ -8,7 +8,7 @@ use rustc_ast::visit::{self, Visitor};
 use rustc_ast::{
     self as ast, Arm, AttrVec, BindingMode, ByRef, Expr, ExprKind, Guard, LocalKind, MacCall,
     Mutability, Pat, PatField, PatFieldsRest, PatKind, Path, QSelf, RangeEnd, RangeSyntax, Stmt,
-    StmtKind, Ty,
+    StmtKind, Ty, TyKind,
 };
 use rustc_ast_pretty::pprust;
 use rustc_errors::{Applicability, Diag, DiagArgValue, PResult, StashKey};
@@ -773,8 +773,30 @@ impl<'a> Parser<'a> {
             self.psess.gated_spans.gate(sym::never_patterns, self.prev_token.span);
             PatKind::Never
         } else if self.eat_keyword(exp!(Underscore)) {
-            // Parse `_`
-            PatKind::Wild
+            if self.token == token::OpenBrace {
+                // A struct pattern with an inferred path, `_ { x, y }`.
+                //
+                // FIXME(struct_args): this breaks stable macros. In every edition, a
+                // `$p:pat`/`$p:pat_param` fragment at the end of a macro arm used to parse `_`
+                // and leave `{ .. }` behind, failing the arm so a later one, like
+                // `(_ { $($t:tt)* })`, could match. Now the fragment takes `_ { .. }`, the arm
+                // matches, and the feature gate errors, even without the feature. `$e:expr`
+                // (2024) and `$s:stmt` have the same problem with `_ { .. }` literals
+                // (`parse_expr_bottom`). `$p:pat {` itself is rejected by the follow-set rules,
+                // so only arms where the fragment ends the matcher are affected.
+                //
+                // Planned fix: in those four fragments (`parse_nonterminal`), don't parse
+                // `_ { .. }` at the fragment's outer bracket depth (`TokenCursor` would need a
+                // `depth()`), which reproduces the old matching exactly. Nested inside
+                // parentheses, brackets or braces it was always an error, so it's fine to allow
+                // there. At stabilization, either keep that rule, or follow `pat_param` (2021)
+                // and `expr_2021` (2024): match `_ { .. }` in the next edition, keep the old
+                // behaviour under `pat_2024`/`expr_2024`, and check with crater first.
+                self.parse_pat_inferred_struct(self.prev_token.span)
+            } else {
+                // Parse `_`
+                PatKind::Wild
+            }
         } else if self.eat_keyword(exp!(Mut)) {
             self.parse_pat_ident_mut()?
         } else if self.eat_keyword(exp!(Ref)) {
@@ -1568,6 +1590,28 @@ impl<'a> Parser<'a> {
         });
         self.bump();
         Ok(PatKind::Struct(qself, path, fields, etc))
+    }
+
+    /// Parses a struct pattern with an inferred path, `_ { x, y }` (`#![feature(struct_args)]`),
+    /// after the `_` at `lo`. It is the struct pattern `<_>::_ { x, y }`, whose struct is the
+    /// type it is matched against.
+    fn parse_pat_inferred_struct(&mut self, lo: Span) -> PatKind {
+        let qself = Box::new(QSelf {
+            ty: self.mk_ty(lo, TyKind::Infer),
+            path_span: lo.shrink_to_lo(),
+            position: 0,
+        });
+        let path = Path::from_ident(Ident::new(kw::Underscore, lo));
+        self.bump(); // `{`
+        let (fields, etc) = self.parse_pat_fields().unwrap_or_else(|mut e| {
+            e.span_label(lo, "while parsing the fields for this pattern");
+            let guar = e.emit_err();
+            self.recover_stmt();
+            (ThinVec::new(), PatFieldsRest::Recovered(guar))
+        });
+        self.bump(); // `}`
+        self.psess.gated_spans.gate(sym::struct_args, lo.to(self.prev_token.span));
+        PatKind::Struct(Some(qself), path, fields, etc)
     }
 
     /// Parse tuple struct or tuple variant pattern (e.g. `Foo(...)` or `Foo::Bar(...)`).

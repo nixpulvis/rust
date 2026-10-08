@@ -18,8 +18,8 @@ use crate::source_map::SpanUtils;
 use crate::spanned::Spanned;
 use crate::types::{PathContext, rewrite_path};
 use crate::utils::{
-    format_mutability, format_pinnedness_and_mutability, format_range_end, mk_sp,
-    mk_sp_lo_plus_one, rewrite_ident,
+    format_mutability, format_pinnedness_and_mutability, format_range_end, is_inferred_struct_path,
+    mk_sp, mk_sp_lo_plus_one, rewrite_ident,
 };
 
 /// Returns `true` if the given pattern is "short".
@@ -352,7 +352,11 @@ fn rewrite_struct_pat(
 ) -> RewriteResult {
     // 2 =  ` {`
     let path_shape = shape.sub_width(2, span)?;
-    let path_str = rewrite_path(context, PathContext::Expr, qself, path, path_shape)?;
+    let path_str = if is_inferred_struct_path(qself, path) {
+        "_".to_owned()
+    } else {
+        rewrite_path(context, PathContext::Expr, qself, path, path_shape)?
+    };
 
     if fields.is_empty() && !ellipsis {
         return Ok(format!("{path_str} {{}}"));

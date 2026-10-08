@@ -26,6 +26,9 @@ use crate::diagnostics::{
 };
 use crate::exp;
 
+/// What diagnostics call an anonymous struct, `struct { .. }`, while parsing its fields.
+pub(super) const RECORD_ADT: &str = "anonymous struct";
+
 impl<'a> Parser<'a> {
     /// Parses a source module as a crate. This is the main entry point for the parser.
     pub fn parse_crate_mod(&mut self) -> PResult<'a, ast::Crate> {
@@ -304,7 +307,7 @@ impl<'a> Parser<'a> {
             self.parse_static_item(safety, mutability)?
         } else if self.check_keyword_case(exp!(Trait), case) || self.check_trait_front_matter() {
             // TRAIT ITEM
-            self.parse_item_trait(attrs, lo)?
+            self.parse_item_trait(attrs, lo, vis)?
         } else if self.check_impl_frontmatter(0) {
             // IMPL ITEM
             self.parse_item_impl(attrs, def_(), false)?
@@ -1163,7 +1166,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses `[impl(in? path)]? const? unsafe? auto? trait Foo { ... }` or `trait Foo = Bar;`.
-    fn parse_item_trait(&mut self, attrs: &mut AttrVec, lo: Span) -> PResult<'a, ItemKind> {
+    fn parse_item_trait(
+        &mut self,
+        attrs: &mut AttrVec,
+        lo: Span,
+        vis: &Visibility,
+    ) -> PResult<'a, ItemKind> {
         let impl_restriction = self.parse_impl_restriction()?;
         let constness = self.parse_constness(Case::Sensitive);
         if let Const::Yes(span) = constness {
@@ -1217,7 +1225,14 @@ impl<'a> Parser<'a> {
         } else {
             // It's a normal trait.
             generics.where_clause = self.parse_where_clause()?;
-            let items = self.parse_item_list(attrs, |p| p.parse_trait_item(ForceCollect::No))?;
+            let mut items =
+                self.parse_item_list(attrs, |p| p.parse_trait_item(ForceCollect::No))?;
+            // The records of trait methods take the trait's visibility.
+            for item in &mut items {
+                if let AssocItemKind::Fn(f) = &mut item.kind {
+                    Self::set_record_visibility(&mut f.sig.decl, vis);
+                }
+            }
             Ok(ItemKind::Trait(Box::new(Trait {
                 impl_restriction,
                 constness,
@@ -2470,7 +2485,12 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_field_ty_separator()?;
-        let ty = self.parse_ty()?;
+        // A field of an anonymous struct may be one too.
+        let ty = if adt_ty == RECORD_ADT && self.is_record_ty_start() {
+            self.parse_record_ty()?
+        } else {
+            self.parse_ty()?
+        };
         if self.token == token::Colon && self.look_ahead(1, |&t| t != token::Colon) {
             return Err(self
                 .dcx()

@@ -2581,6 +2581,9 @@ pub enum TyKind {
     View(Box<Ty>, #[visitable(ignore)] ThinVec<Ident>),
     /// An mGCA `gca!()` expression.
     GcaMacro(Box<Expr>),
+    /// The anonymous struct of a parameter, `_ { x: u32, y: u32 = 0 }` (`#![feature(struct_args)]`),
+    /// called a record. It is a struct of its own, owned by its function, whose generics it shares.
+    Record(Box<RecordTy>),
     /// Sometimes we need a dummy value when no error has occurred.
     Dummy,
     /// Placeholder for a kind that has failed to be defined.
@@ -3649,6 +3652,18 @@ pub struct FieldDef {
 
     pub ty: Box<Ty>,
     pub is_placeholder: bool,
+}
+
+/// The anonymous struct of a parameter, see [`TyKind::Record`].
+#[derive(Clone, Encodable, Decodable, Debug, Walkable)]
+pub struct RecordTy {
+    pub id: NodeId,
+    /// The visibility of the record and its fields, which is that of its function.
+    pub vis: Visibility,
+    pub fields: ThinVec<FieldDef>,
+    pub recovered: Recovered,
+    /// The span of the `_` that starts the record, which names it in diagnostics.
+    pub ident_span: Span,
 }
 
 /// Some properties from [FieldDef] are rarely used,

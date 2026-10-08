@@ -145,14 +145,12 @@ impl<'a> State<'a> {
         self.end(ib);
     }
 
-    fn print_expr_struct(
-        &mut self,
-        qself: &Option<Box<ast::QSelf>>,
-        path: &ast::Path,
-        fields: &[ast::ExprField],
-        rest: &ast::StructRest,
-    ) {
-        if let Some(qself) = qself {
+    fn print_expr_struct(&mut self, se: &ast::StructExpr) {
+        let ast::StructExpr { qself, path, fields, rest } = se;
+        let is_inferred = super::is_inferred_struct_path(qself, path);
+        if is_inferred {
+            self.word("_");
+        } else if let Some(qself) = qself {
             self.print_qpath(path, qself, true);
         } else {
             self.print_path(path, true, 0);
@@ -455,7 +453,7 @@ impl<'a> State<'a> {
                 self.print_expr_repeat(element, count);
             }
             ast::ExprKind::Struct(se) => {
-                self.print_expr_struct(&se.qself, &se.path, &se.fields, &se.rest);
+                self.print_expr_struct(se);
             }
             ast::ExprKind::Tup(exprs) => {
                 self.print_expr_tup(exprs);

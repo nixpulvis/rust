@@ -1,0 +1,20 @@
+error: anonymous structs are only allowed as parameter types
+  --> $DIR/record-args-parse-errors.rs:5:15
+   |
+LL | type Ptr = fn(struct { x: u32 });
+   |               ^^^^^^^^^^^^^^^^^ not allowed here
+
+error: anonymous structs are only allowed as parameter types
+  --> $DIR/record-args-parse-errors.rs:10:8
+   |
+LL |     a: struct { x: u32 },
+   |        ^^^^^^^^^^^^^^^^^ not allowed here
+
+error: expected one of `:` or `|`, found `)`
+  --> $DIR/record-args-parse-errors.rs:15:33
+   |
+LL | fn inferred_pattern(_ { x: u32 }) {}
+   |                                 ^ expected one of `:` or `|`
+
+error: aborting due to 3 previous errors
+

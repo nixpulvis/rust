@@ -65,6 +65,17 @@ impl<'a, 'ra, 'tcx> DefCollector<'a, 'ra, 'tcx> {
         )
     }
 
+    /// The function whose parameters are being collected, from within the fields of their
+    /// anonymous structs, however deeply nested (see `visit_ty`).
+    fn record_function(&self) -> LocalDefId {
+        let tcx = self.r.tcx;
+        let mut parent = self.invocation_parent.parent_def;
+        while matches!(tcx.def_kind(parent), DefKind::Field | DefKind::Struct) {
+            parent = tcx.local_parent(parent);
+        }
+        parent
+    }
+
     fn with_parent<F: FnOnce(&mut Self)>(&mut self, parent_def: LocalDefId, f: F) {
         let orig_parent_def = mem::replace(&mut self.invocation_parent.parent_def, parent_def);
         f(self);
@@ -444,6 +455,24 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
     }
 
     fn visit_ty(&mut self, ty: &'a Ty) {
+        if let TyKind::Record(record) = &ty.kind {
+            // The anonymous struct is a struct of its own, a child of its function or, when it is
+            // the type of another one's field, of that field, and its fields are its children.
+            let feed = self.create_def(
+                record.id,
+                Some(sym::record_struct),
+                DefKind::Struct,
+                record.ident_span,
+            );
+            let vis = self.resolve_visibility(&record.vis);
+            self.r.feed_visibility(feed, vis);
+            self.with_parent(feed.def_id(), |this| {
+                for (index, field) in record.fields.iter().enumerate() {
+                    this.collect_field(field, Some(index));
+                }
+            });
+            return;
+        }
         match ty.kind {
             TyKind::MacCall(..) => {
                 self.visit_macro_invoc(ty.id);
@@ -460,7 +489,15 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
                     ImplTraitContext::Existential => DefKind::OpaqueTy,
                     ImplTraitContext::InBinding => return visit::walk_ty(self, ty),
                 };
+                // `impl Trait` in a field of an anonymous struct is a parameter of its function.
+                let parent = if kind == DefKind::TyParam {
+                    self.record_function()
+                } else {
+                    self.invocation_parent.parent_def
+                };
+                let orig_parent_def = mem::replace(&mut self.invocation_parent.parent_def, parent);
                 let id = self.create_def(opaque_id, Some(name), kind, ty.span).def_id();
+                self.invocation_parent.parent_def = orig_parent_def;
                 match self.invocation_parent.impl_trait_context {
                     // Do not nest APIT, as we desugar them as `impl_trait: bounds`,
                     // so the `impl_trait` node is not a parent to `bounds`.

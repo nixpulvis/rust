@@ -904,7 +904,7 @@ impl TyCoercionStability {
                     // FIXME(scrabsha): what are the semantics of view types here?
                     Self::for_hir_ty(ty)
                 },
-                TyKind::UnsafeBinder(..) => Self::None,
+                TyKind::UnsafeBinder(..) | TyKind::Record(_) => Self::None,
             };
         }
     }

@@ -4449,20 +4449,6 @@ pub(crate) struct ImplReuseInherentImpl {
 }
 
 #[derive(Diagnostic)]
-#[diag("placeholder `_` is not allowed for the path in struct literals")]
-pub(crate) struct StructLiteralPlaceholderPath {
-    #[primary_span]
-    #[label("not allowed in struct literals")]
-    #[suggestion(
-        "replace it with the correct type",
-        applicability = "has-placeholders",
-        code = "/* Type */",
-        style = "verbose"
-    )]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag("struct literal body without path")]
 pub(crate) struct StructLiteralWithoutPathLate {
     #[primary_span]

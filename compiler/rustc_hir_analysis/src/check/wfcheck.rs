@@ -2011,6 +2011,11 @@ pub(super) fn check_variances_for_type_defn<'tcx>(tcx: TyCtxt<'tcx>, def_id: Loc
         kind => span_bug!(tcx.def_span(def_id), "cannot compute the variances of {kind:?}"),
     }
 
+    // A record's generic parameters are its function's, which its fields need not use.
+    if tcx.is_record(def_id.to_def_id()) {
+        return;
+    }
+
     let ty_clauses = tcx.clauses_of(def_id);
     assert_eq!(ty_clauses.parent, None);
     let variances = tcx.variances_of(def_id);

@@ -18,6 +18,7 @@ use rustc_middle::ty::{
     TypeFolder, TypeSuperFoldable, TypeVisitable, TypeVisitableExt, TypeVisitor, TypingMode,
     Unnormalized, Upcast,
 };
+use rustc_span::edit_distance::find_best_match_for_name;
 use rustc_span::{BytePos, DUMMY_SP, Span, bug, span_bug};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::infer::InferCtxtExt;
@@ -69,8 +70,185 @@ fn compare_impl_method<'tcx>(
     impl_trait_ref: ty::TraitRef<'tcx>,
 ) -> Result<(), ErrorGuaranteed> {
     check_method_is_structurally_compatible(tcx, impl_m, trait_m, impl_trait_ref, false)?;
+    let records = compare_record_params(tcx, impl_m, trait_m, impl_trait_ref);
     compare_method_clause_entailment(tcx, impl_m, trait_m, impl_trait_ref)?;
-    Ok(())
+    records
+}
+
+/// The anonymous struct parameters of a trait impl's method (`#![feature(struct_args)]`) take the
+/// trait method's anonymous structs (see `lower_record_param_ty`), and only repeat their fields.
+/// Checks that the impl repeats exactly the trait's fields, with the trait's types, ignoring
+/// lifetimes, which the parameter takes from the trait, and without defaults, which come from the
+/// trait.
+fn compare_record_params<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    impl_m: ty::AssocItem,
+    trait_m: ty::AssocItem,
+    impl_trait_ref: ty::TraitRef<'tcx>,
+) -> Result<(), ErrorGuaranteed> {
+    let impl_m_def_id = impl_m.def_id.expect_local();
+    let Some(decl) = tcx.hir_fn_decl_by_hir_id(tcx.local_def_id_to_hir_id(impl_m_def_id)) else {
+        return Ok(());
+    };
+    if !decl.inputs.iter().any(|input| matches!(input.kind, hir::TyKind::Record(_))) {
+        return Ok(());
+    }
+    let trait_sig = tcx.fn_sig(trait_m.def_id).instantiate_identity().skip_norm_wip().skip_binder();
+    let trait_to_impl_args = GenericArgs::identity_for_item(tcx, impl_m.def_id).rebase_onto(
+        tcx,
+        impl_m.container_id(tcx),
+        impl_trait_ref.args,
+    );
+    let typing_env = ty::TypingEnv::non_body_analysis(tcx, impl_m.def_id);
+    let mut result = Ok(());
+    for (input, &trait_input) in iter::zip(decl.inputs, trait_sig.inputs()) {
+        let hir::TyKind::Record(item) = input.kind else { continue };
+        let ty::Adt(trait_record, _) = trait_input.kind() else { continue };
+        if !tcx.is_record(trait_record.did()) {
+            continue;
+        }
+        if let Err(guar) = compare_record_fields(
+            tcx,
+            item,
+            input.span,
+            *trait_record,
+            trait_to_impl_args,
+            typing_env,
+        ) {
+            result = Err(guar);
+        }
+    }
+    result
+}
+
+/// Compares the fields of the anonymous struct `item` of a trait impl's method, written at `span`,
+/// with those of the trait method's `trait_record` (see `compare_record_params`).
+fn compare_record_fields<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    item: hir::ItemId,
+    span: Span,
+    trait_record: ty::AdtDef<'tcx>,
+    trait_to_impl_args: ty::GenericArgsRef<'tcx>,
+    typing_env: ty::TypingEnv<'tcx>,
+) -> Result<(), ErrorGuaranteed> {
+    let hir::ItemKind::Struct(_, _, data) = tcx.hir_item(item).kind else { return Ok(()) };
+    let trait_fields = &trait_record.non_enum_variant().fields;
+    let impl_fields = data.fields();
+    let mut missing: Vec<_> = trait_fields
+        .iter()
+        .filter(|trait_field| impl_fields.iter().all(|f| f.ident.name != trait_field.name))
+        .collect();
+    let unknown: Vec<_> = impl_fields
+        .iter()
+        .filter(|field| trait_fields.iter().all(|f| f.name != field.ident.name))
+        .collect();
+    let mut result = Ok(());
+    for field in &unknown {
+        let (field_span, name) = (field.ident.span, field.ident.name);
+        let mut err = tcx.dcx().struct_span_err(
+            field_span,
+            format!("field `{name}` is not a member of the trait's anonymous struct"),
+        );
+        err.span_label(field_span, "not a member of the trait's anonymous struct");
+        if let [trait_field] = missing.as_slice() {
+            if find_best_match_for_name(&[trait_field.name], name, None).is_some() {
+                err.span_suggestion_verbose(
+                    field_span,
+                    "a field with a similar name exists",
+                    trait_field.name,
+                    Applicability::MaybeIncorrect,
+                );
+                missing.clear();
+            } else if unknown.len() == 1 {
+                err.span_suggestion_short(
+                    field_span,
+                    format!(
+                        "the trait's anonymous struct has a field named `{}`",
+                        trait_field.name
+                    ),
+                    trait_field.name,
+                    Applicability::MaybeIncorrect,
+                );
+            }
+        }
+        result = Err(err.emit_err());
+    }
+    for trait_field in missing {
+        let name = trait_field.name;
+        let mut err = tcx
+            .dcx()
+            .struct_span_err(span, format!("missing field `{name}` in anonymous struct parameter"));
+        err.span_label(span, format!("missing `{name}` in implementation"));
+        if let Some(trait_span) = tcx.hir_span_if_local(trait_field.did) {
+            err.span_label(trait_span, format!("`{name}` from trait"));
+        }
+        result = Err(err.emit_err());
+    }
+    for field in impl_fields {
+        let trait_field = trait_fields.iter().find(|f| f.name == field.ident.name);
+        if let Some(default) = field.default {
+            // Every call fills in the trait's defaults, also through generics and `dyn`, which
+            // can't know the impl, so the impl can't have defaults of its own.
+            let mut err = tcx
+                .dcx()
+                .struct_span_err(default.span, "default values are not allowed in trait impls");
+            err.span_label(default.span, "not allowed in a trait impl");
+            match trait_field.and_then(|f| f.value) {
+                Some(trait_default) => {
+                    err.span_note(
+                        tcx.def_span(trait_default),
+                        format!("calls take the default of `{}` from the trait", field.ident),
+                    );
+                }
+                None => {
+                    err.note(format!("`{}` has no default in the trait", field.ident));
+                }
+            }
+            result = Err(err.emit_err());
+        }
+        let Some(trait_field) = trait_field else {
+            continue;
+        };
+        // A field that is itself an anonymous struct is the trait's, whose fields the impl repeats
+        // in turn. It shares the trait method's generics, so the same arguments apply.
+        if let hir::TyKind::Record(nested) = field.ty.kind
+            && let ty::Adt(trait_nested, _) =
+                tcx.type_of(trait_field.did).instantiate_identity().skip_norm_wip().kind()
+            && tcx.is_record(trait_nested.did())
+        {
+            if let Err(guar) = compare_record_fields(
+                tcx,
+                nested,
+                field.ty.span,
+                *trait_nested,
+                trait_to_impl_args,
+                typing_env,
+            ) {
+                result = Err(guar);
+            }
+            continue;
+        }
+        let normalize = |ty| tcx.try_normalize_erasing_regions(typing_env, ty);
+        let (Ok(impl_ty), Ok(trait_ty)) = (
+            normalize(tcx.type_of(field.def_id).instantiate_identity()),
+            normalize(tcx.type_of(trait_field.did).instantiate(tcx, trait_to_impl_args)),
+        ) else {
+            continue;
+        };
+        if impl_ty != trait_ty && !(impl_ty, trait_ty).references_error() {
+            result = Err(struct_span_code_err!(
+                tcx.dcx(),
+                field.ty.span,
+                E0053,
+                "field `{}` of an anonymous struct parameter has an incompatible type for trait",
+                field.ident
+            )
+            .with_span_label(field.ty.span, format!("expected `{trait_ty}`, found `{impl_ty}`"))
+            .with_span_note(tcx.def_span(trait_field.did), "type in trait")
+            .emit_err());
+        }
+    }
+    result
 }
 
 /// Checks a bunch of different properties of the impl/trait methods for

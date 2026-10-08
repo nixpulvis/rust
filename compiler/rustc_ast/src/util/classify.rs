@@ -308,6 +308,7 @@ fn type_trailing_braced_mac_call(mut ty: &ast::Ty) -> Option<&ast::MacCall> {
             | ast::TyKind::FieldOf(..)
             | ast::TyKind::View(..)
             | ast::TyKind::GcaMacro(..)
+            | ast::TyKind::Record(..)
             | ast::TyKind::Dummy
             | ast::TyKind::Err(..) => break None,
         }

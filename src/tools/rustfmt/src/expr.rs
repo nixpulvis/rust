@@ -33,8 +33,8 @@ use crate::string::{StringFormat, rewrite_string};
 use crate::types::{PathContext, rewrite_path};
 use crate::utils::{
     colon_spaces, contains_skip, count_newlines, filtered_str_fits, first_line_ends_with,
-    inner_attributes, last_line_extendable, last_line_width, mk_sp, outer_attributes,
-    semicolon_for_expr, unicode_str_width, wrap_str,
+    inner_attributes, is_inferred_struct_path, last_line_extendable, last_line_width, mk_sp,
+    outer_attributes, semicolon_for_expr, unicode_str_width, wrap_str,
 };
 use crate::vertical::rewrite_with_alignment;
 use crate::visitor::FmtVisitor;
@@ -1822,7 +1822,11 @@ fn rewrite_struct_lit<'a>(
 
     // 2 = " {".len()
     let path_shape = shape.sub_width(2, span)?;
-    let path_str = rewrite_path(context, PathContext::Expr, qself, path, path_shape)?;
+    let path_str = if is_inferred_struct_path(qself, path) {
+        "_".to_owned()
+    } else {
+        rewrite_path(context, PathContext::Expr, qself, path, path_shape)?
+    };
 
     let has_base_or_rest = match struct_rest {
         ast::StructRest::None if fields.is_empty() => return Ok(format!("{path_str} {{}}")),

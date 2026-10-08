@@ -207,6 +207,11 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             Some(parent)
         }
 
+        // A record, an anonymous struct, shares its function's generics.
+        Node::Item(_) if tcx.is_record(def_id.to_def_id()) => {
+            Some(tcx.record_function(def_id.to_def_id()).expect_local())
+        }
+
         // All of these nodes have no parent from which to inherit generics.
         Node::Item(_) | Node::ForeignItem(_) => None,
 

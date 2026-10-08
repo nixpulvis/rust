@@ -7,7 +7,7 @@ use rustc_ast::ast::{
 };
 use rustc_ast_pretty::pprust;
 use rustc_feature::is_builtin_attr_name;
-use rustc_span::{BytePos, LocalExpnId, Span, Symbol, SyntaxContext, sym, symbol};
+use rustc_span::{BytePos, LocalExpnId, Span, Symbol, SyntaxContext, kw, sym, symbol};
 use unicode_width::UnicodeWidthStr;
 
 use crate::comment::{CharClasses, FullCodeCharKind, LineClasses, filter_normal_code};
@@ -27,6 +27,13 @@ pub(crate) fn skip_annotation() -> Symbol {
 
 pub(crate) fn rewrite_ident<'a>(context: &'a RewriteContext<'_>, ident: symbol::Ident) -> &'a str {
     context.snippet(ident.span)
+}
+
+/// Whether `qself` and `path` are the inferred path `<_>::_` of a struct literal or pattern
+/// written `_ { .. }` (`#![feature(struct_args)]`).
+pub(crate) fn is_inferred_struct_path(qself: &Option<Box<ast::QSelf>>, path: &Path) -> bool {
+    matches!(qself, Some(qself) if matches!(qself.ty.kind, ast::TyKind::Infer))
+        && matches!(&path.segments[..], [segment] if segment.ident.name == kw::Underscore)
 }
 
 // Computes the length of a string's last line, minus offset.

@@ -1079,6 +1079,7 @@ pub fn walk_ty<'v, V: Visitor<'v>>(visitor: &mut V, typ: &'v Ty<'v, AmbigArg>) -
                 try_visit!(visitor.visit_ident(*field));
             }
         }
+        TyKind::Record(item) => try_visit!(visitor.visit_nested_item(item)),
     }
     V::Result::output()
 }
