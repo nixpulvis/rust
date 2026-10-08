@@ -5,6 +5,7 @@
 // record whose fields all have defaults, `f(a)`, and `;` in a parameter list,
 // `fn f(a: i32; x: i32)` for `fn f(a: i32, struct { x: i32 })`.
 #![feature(struct_args, struct_args_pattern_elision, named_arguments, default_field_values)]
+#![feature(parameter_type_elision)]
 #![allow(incomplete_features)]
 
 fn greet(prefix: &str, struct { name: &str, times: usize = 1 }) -> String {
@@ -19,6 +20,10 @@ struct Opts {
 
 fn configure(o: Opts) -> u8 {
     if o.verbose { o.level * 10 } else { o.level }
+}
+
+fn configure_untyped(Opts { verbose, level }) -> u8 {
+    if verbose { level * 10 } else { level }
 }
 
 struct Sink;
@@ -106,11 +111,13 @@ fn main() {
     // Named arguments imply `..`, for records and named structs alike.
     assert_eq!(greet("> ", name: "d"), "> d");
     assert_eq!(configure(verbose: true), 10);
+    assert_eq!(configure_untyped(level: 4), 4);
 
     // Any struct-typed last parameter, with defaults or a base.
     let base = Opts { verbose: true, level: 2 };
     assert_eq!(configure(level: 5, ..base), 50);
     assert_eq!(configure(verbose: true, ..), 10);
+    assert_eq!(configure_untyped(level: 3, ..), 3);
 
     // Methods, `fn` pointers, macros, and struct-literal-restricted positions.
     assert_eq!(Sink.write(byte: 3, ..), 3);

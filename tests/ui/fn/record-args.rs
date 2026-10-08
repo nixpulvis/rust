@@ -2,6 +2,7 @@
 //@ edition: 2024
 // Record parameters and record arguments (`#![feature(struct_args)]`).
 #![feature(struct_args, struct_args_pattern_elision, default_field_values)]
+#![feature(parameter_type_elision)]
 #![allow(incomplete_features)]
 
 #[derive(Debug, PartialEq)]
@@ -25,6 +26,14 @@ pub struct CropArgs {
 }
 
 fn crop_named(CropArgs { x, y, width, height }: CropArgs) -> Rect {
+    Rect { x, y, width, height }
+}
+
+// A struct pattern names its type, so the parameter's type can be left out
+// (`#![feature(parameter_type_elision)]`, see `param-type-elision.rs`), and an inferred struct
+// literal takes it from there.
+fn crop_untyped(img: u8, CropArgs { x, y, width, height }) -> Rect {
+    let _ = img;
     Rect { x, y, width, height }
 }
 
@@ -297,6 +306,7 @@ fn main() {
     assert_eq!(crop_named(CropArgs { x: 10, y: 20, width: 200, .. }), expected);
     let opts = CropArgs { x: 10, y: 20, width: 1, .. };
     assert_eq!(crop_named(_ { width: 200, ..opts }), expected);
+    assert_eq!(crop_untyped(0, _ { x: 10, y: 20, width: 200, .. }), expected);
 
     // Methods.
     let mut sink = Sink(vec![]);

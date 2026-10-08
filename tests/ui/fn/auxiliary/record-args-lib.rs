@@ -1,5 +1,6 @@
 //@ edition: 2024
 #![feature(struct_args, struct_args_pattern_elision, default_field_values)]
+#![feature(parameter_type_elision)]
 #![allow(incomplete_features)]
 
 pub fn crop<'a>(img: &'a str, struct { width: u32, x: u32 = 0, label: &'a str = "crop" }) -> String {
@@ -25,7 +26,7 @@ pub struct Options {
     pub verbose: bool = false,
 }
 
-pub fn run(Options { verbose }: Options) -> bool {
+pub fn run(Options { verbose }) -> bool {
     verbose
 }
 
