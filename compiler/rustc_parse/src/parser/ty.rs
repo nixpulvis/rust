@@ -316,7 +316,7 @@ impl<'a> Parser<'a> {
         } else if self.is_record_ty_start() {
             // An anonymous struct, `struct { .. }`, outside of the places that parse it on their
             // own (see `parse_record_ty`). Parse it to recover.
-            let ty = self.parse_record_ty()?;
+            let ty = self.parse_record_ty(None)?;
             TyKind::Err(
                 self.dcx()
                     .struct_span_err(

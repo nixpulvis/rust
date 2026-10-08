@@ -268,6 +268,10 @@ declare_features! (
     /// Allows anonymous struct types for parameters, `fn f(_ { x }: struct { x: u32 })`, and
     /// inferred struct literals and patterns, `f(_ { x: 1 })`.
     (incomplete, struct_args, "CURRENT_RUSTC_VERSION", None),
+    /// Allows a parameter that is just an anonymous struct to leave out its pattern, which binds
+    /// its fields, `fn f(struct { x: u32 })` for `fn f(_ { x }: struct { x: u32 })` (needs
+    /// `struct_args`).
+    (incomplete, struct_args_pattern_elision, "CURRENT_RUSTC_VERSION", None),
     /// Perma-unstable, only used in the test suite for binders (`for<'a>`).
     (internal, test_binder_constraints, "CURRENT_RUSTC_VERSION", None),
     /// Perma-unstable, only used to test the `incomplete_features` lint.

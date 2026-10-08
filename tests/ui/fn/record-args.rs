@@ -1,7 +1,7 @@
 //@ run-pass
 //@ edition: 2024
 // Record parameters and record arguments (`#![feature(struct_args)]`).
-#![feature(struct_args, default_field_values)]
+#![feature(struct_args, struct_args_pattern_elision, default_field_values)]
 #![allow(incomplete_features)]
 
 #[derive(Debug, PartialEq)]
@@ -12,9 +12,7 @@ struct Rect {
     height: u32,
 }
 
-fn crop(
-    _ { x, y, width, height }: struct { x: u32, y: u32, width: u32, height: u32 = 100 },
-) -> Rect {
+fn crop(struct { x: u32, y: u32, width: u32, height: u32 = 100 }) -> Rect {
     Rect { x, y, width, height }
 }
 
@@ -33,15 +31,15 @@ fn crop_named(CropArgs { x, y, width, height }: CropArgs) -> Rect {
 // A trait's record parameter is shared by its impls, which repeat its fields but not its
 // defaults, and by calls through generics and trait objects.
 trait Writer {
-    fn write(&mut self, _: struct { data: &'static str, times: usize = 1 }) -> String;
-    fn describe(&self, _ { prefix }: struct { prefix: &'static str = "> " }) -> String {
+    fn write(&mut self, struct { data: &'static str, times: usize = 1 }) -> String;
+    fn describe(&self, struct { prefix: &'static str = "> " }) -> String {
         format!("{prefix}writer")
     }
 }
 
 struct Buffer(Vec<String>);
 impl Writer for Buffer {
-    fn write(&mut self, _ { data, times }: struct { data: &'static str, times: usize }) -> String {
+    fn write(&mut self, struct { data: &'static str, times: usize }) -> String {
         let s = data.repeat(times);
         self.0.push(s.clone());
         s
@@ -50,10 +48,10 @@ impl Writer for Buffer {
 
 struct Loud;
 impl Writer for Loud {
-    fn write(&mut self, _ { times, data }: struct { times: usize, data: &'static str }) -> String {
+    fn write(&mut self, struct { times: usize, data: &'static str }) -> String {
         data.to_uppercase().repeat(times)
     }
-    fn describe(&self, _ { prefix }: struct { prefix: &'static str }) -> String {
+    fn describe(&self, struct { prefix: &'static str }) -> String {
         format!("{prefix}LOUD")
     }
 }
@@ -67,70 +65,58 @@ fn write_twice<W: Writer>(w: &mut W) -> String {
 // and lifetimes: elided ones are elided in the signature too, named ones are the function's.
 fn map<T, U>(
     v: Vec<T>,
-    _ { f, label, limit }: struct { f: impl Fn(&T) -> U, label: &str, limit: usize = 10 },
+    struct { f: impl Fn(&T) -> U, label: &str, limit: usize = 10 },
 ) -> (String, Vec<U>) {
     (label.to_string(), v.iter().take(limit).map(f).collect())
 }
 
 fn collect<T, const N: usize>(
-    _ { item, extra, arr }: struct { item: T, extra: Vec<T> = Vec::new(), arr: [u8; N] = [0; N] },
+    struct { item: T, extra: Vec<T> = Vec::new(), arr: [u8; N] = [0; N] },
 ) -> (Vec<T>, usize) {
     let mut v = extra;
     v.push(item);
     (v, arr.len())
 }
 
-fn say(
-    from: &str,
-    _ { device, tag }: struct { device: &str = "carrier pigeon", tag: Option<&'_ str> = None },
-) -> String {
+fn say(from: &str, struct { device: &str = "carrier pigeon", tag: Option<&'_ str> = None }) -> String {
     format!("{from} with a {device}{}", tag.unwrap_or(""))
 }
 
 // A lone elided input lifetime, here in the record, is the output's.
-fn prefix(_ { s, n }: struct { s: &str = "abc", n: usize = 1 }) -> &str {
+fn prefix(struct { s: &str = "abc", n: usize = 1 }) -> &str {
     &s[..n]
 }
 
-fn pick<'a>(x: &'a str, _ { fallback }: struct { fallback: &'a str = "none" }) -> &'a str {
+fn pick<'a>(x: &'a str, struct { fallback: &'a str = "none" }) -> &'a str {
     if x.is_empty() { fallback } else { x }
 }
 
 // Lifetimes of `fn` pointers and `Fn` bounds in a field's type are their own.
 fn apply(
-    _ { f, g }: struct {
-        f: fn(&str) -> usize = str::len,
-        g: &dyn Fn(&str) -> usize = &|s: &str| s.len(),
-    },
+    struct { f: fn(&str) -> usize = str::len, g: &dyn Fn(&str) -> usize = &|s: &str| s.len() },
 ) -> usize {
     f("ab") + g("abc")
 }
 
 // In a trait, impls repeat a field with an elided lifetime like any other.
 trait Label {
-    fn label(&self, _: struct { pre: &str = "<", post: &str = ">" }) -> String;
+    fn label(&self, struct { pre: &str = "<", post: &str = ">" }) -> String;
 }
 impl Label for u8 {
-    fn label(&self, _ { post, pre }: struct { post: &str, pre: &str }) -> String {
+    fn label(&self, struct { post: &str, pre: &str }) -> String {
         format!("{pre}{self}{post}")
     }
 }
 
 trait Store<K> {
     type Item;
-    fn put(
-        &mut self,
-        _: struct { key: K, value: Self::Item, note: &str, times: usize = 1 },
-    ) -> usize;
+    fn put(&mut self, struct { key: K, value: Self::Item, note: &str, times: usize = 1 }) -> usize;
 }
 
 struct Log(Vec<String>);
 impl<K: std::fmt::Display> Store<K> for Log {
     type Item = u32;
-    fn put(
-        &mut self,
-        _ { value, note, key, times }: struct { value: u32, note: &str, key: K, times: usize },
-    ) -> usize {
+    fn put(&mut self, struct { value: u32, note: &str, key: K, times: usize }) -> usize {
         for _ in 0..times {
             self.0.push(format!("{key}={value} ({note})"));
         }
@@ -141,14 +127,14 @@ impl<K: std::fmt::Display> Store<K> for Log {
 #[derive(Debug, PartialEq)]
 struct Point(i32, i32);
 impl Point {
-    fn with(&self, _ { other, scale }: struct { other: Self, scale: i32 = 1 }) -> Self {
+    fn with(&self, struct { other: Self, scale: i32 = 1 }) -> Self {
         Point(self.0 + other.0 * scale, self.1 + other.1 * scale)
     }
 }
 
 struct Sink(Vec<u8>);
 impl Sink {
-    fn write(&mut self, _ { byte, times }: struct { byte: u8, times: usize = 1 }) {
+    fn write(&mut self, struct { byte: u8, times: usize = 1 }) {
         for _ in 0..times {
             self.0.push(byte);
         }
@@ -158,24 +144,24 @@ impl Sink {
 // A method with the same name in the same module gets its own argument struct.
 struct Echo;
 impl Echo {
-    fn write(&self, _ { byte }: struct { byte: u8 }) -> u8 {
+    fn write(&self, struct { byte: u8 }) -> u8 {
         byte
     }
-    fn write_twice(&self, _ { byte }: struct { byte: u8 }) -> [u8; 2] {
+    fn write_twice(&self, struct { byte: u8 }) -> [u8; 2] {
         [byte; 2]
     }
 }
 
-fn pair(_ { a, b }: struct { a: u32, b: u32 }) -> (u32, u32) {
+fn pair(struct { a: u32, b: u32 }) -> (u32, u32) {
     (a, b)
 }
 
 struct Counter(u32);
 impl Counter {
-    const fn new(_ { start }: struct { start: u32 = 0 }) -> Self {
+    const fn new(struct { start: u32 = 0 }) -> Self {
         Counter(start)
     }
-    fn bump(&mut self, _ { by }: struct { by: u32 = 1 }) {
+    fn bump(&mut self, struct { by: u32 = 1 }) {
         self.0 += by;
     }
 }
@@ -183,7 +169,7 @@ const ZERO: Counter = Counter::new(_ { .. });
 
 // A field can be bound mutably, as a positional parameter can. Impls choose their own binding
 // modes.
-fn countdown(_ { mut n, step }: struct { n: u32, step: u32 = 1 }) -> Vec<u32> {
+fn countdown(struct { mut n: u32, step: u32 = 1 }) -> Vec<u32> {
     let mut v = vec![];
     while n > 0 {
         v.push(n);
@@ -193,19 +179,17 @@ fn countdown(_ { mut n, step }: struct { n: u32, step: u32 = 1 }) -> Vec<u32> {
 }
 
 // And by reference, as with `fn f(ref x: String)`, to borrow one field while moving another.
-fn split(
-    _ { ref label, ref mut log, owned }: struct { label: String, log: Vec<String>, owned: String },
-) -> usize {
+fn split(struct { ref label: String, ref mut log: Vec<String>, owned: String }) -> usize {
     log.push(owned);
     label.len() + log.len()
 }
 
 trait Grow {
-    fn grow(&self, _: struct { by: u32 }) -> u32;
+    fn grow(&self, struct { by: u32 }) -> u32;
     fn grow_by(&self, args: struct { by: u32, times: u32 = 1 }) -> u32;
 }
 impl Grow for u32 {
-    fn grow(&self, _ { mut by }: struct { by: u32 }) -> u32 {
+    fn grow(&self, struct { mut by: u32 }) -> u32 {
         by += *self;
         by
     }
@@ -246,62 +230,53 @@ fn nested_pat(_ { inner: Rect { width, .. } }: struct { inner: Rect }) -> u32 {
 
 // A field of an anonymous struct may be one too, with defaults of its own. Its pattern only
 // binds the outer fields, so `at` is the whole inner struct, which `_ { .. }` can take apart.
-fn place(
-    _ { at, scale }: struct { at: struct { x: u32, y: u32 = 0 }, scale: u32 = 1 },
-) -> (u32, u32) {
+fn place(struct { at: struct { x: u32, y: u32 = 0 }, scale: u32 = 1 }) -> (u32, u32) {
     let _ { x, y } = at;
     (x * scale, y * scale)
 }
 
-fn place_label(
-    _ { at: _ { ref label, .. } }: struct { at: struct { label: String, n: u8 = 0 } },
-) -> usize {
+fn place_label(_ { at: _ { ref label, .. } }: struct { at: struct { label: String, n: u8 = 0 } }) -> usize {
     label.len()
 }
 
-fn nested_generic<T: Copy, U>(
-    _ { inner }: struct { inner: struct { v: T, f: impl Fn(T) -> U } },
-) -> U {
+fn nested_generic<T: Copy, U>(struct { inner: struct { v: T, f: impl Fn(T) -> U } }) -> U {
     (inner.f)(inner.v)
 }
 
 trait Place {
-    fn place(&self, _: struct { at: struct { x: u32, y: u32 = 7 } }) -> u32;
+    fn place(&self, struct { at: struct { x: u32, y: u32 = 7 } }) -> u32;
 }
 impl Place for u32 {
-    fn place(&self, _ { at }: struct { at: struct { y: u32, x: u32 } }) -> u32 {
+    fn place(&self, struct { at: struct { y: u32, x: u32 } }) -> u32 {
         self + at.x + at.y
     }
 }
 
 // Positional parameters keep their patterns.
-fn offset((x, y): (i32, i32), _ { scale }: struct { scale: i32 = 1 }) -> i32 {
+fn offset((x, y): (i32, i32), struct { scale: i32 = 1 }) -> i32 {
     (x + y) * scale
 }
 
-fn scale(_ { by }: struct { by: u32 = 2 }, n: u32) -> u32 {
+fn scale(struct { by: u32 = 2 }, n: u32) -> u32 {
     n * by
 }
 
-fn blend(
-    _ { r, g }: struct { r: u8, g: u8 },
-    _ { alpha }: struct { alpha: u8 = 255 },
-) -> (u8, u8, u8) {
+fn blend(struct { r: u8, g: u8 }, struct { alpha: u8 = 255 }) -> (u8, u8, u8) {
     (r, g, alpha)
 }
 
 trait Mix {
-    fn mix(&self, _: struct { a: u32 }, _: struct { b: u32 = 1 }) -> u32;
+    fn mix(&self, struct { a: u32 }, struct { b: u32 = 1 }) -> u32;
 }
 impl Mix for u32 {
-    fn mix(&self, _ { a }: struct { a: u32 }, _ { b }: struct { b: u32 }) -> u32 {
+    fn mix(&self, struct { a: u32 }, struct { b: u32 }) -> u32 {
         self + a * b
     }
 }
 
 macro_rules! make_double {
     ($name:ident) => {
-        fn $name(_ { v }: struct { v: u32 }) -> u32 {
+        fn $name(struct { v: u32 }) -> u32 {
             v * 2
         }
     };
@@ -398,7 +373,7 @@ fn main() {
 
     // Functions from macros and in blocks.
     assert_eq!(double(_ { v: 21 }), 42);
-    fn len(_ { s }: struct { s: &'static str }) -> usize {
+    fn len(struct { s: &'static str }) -> usize {
         s.len()
     }
     assert_eq!(len(_ { s: "abc" }), 3);

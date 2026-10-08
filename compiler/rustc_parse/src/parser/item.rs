@@ -2166,11 +2166,24 @@ impl<'a> Parser<'a> {
         ident_span: Span,
         parsed_where: bool,
     ) -> PResult<'a, (ThinVec<FieldDef>, Recovered)> {
+        self.parse_record_fields(adt_ty, ident_span, parsed_where, None)
+    }
+
+    /// Parses the fields of a record struct or, when `bindings` is given, of a parameter's
+    /// anonymous struct, whose fields may start with a binding mode, `mut`, `ref` or `ref mut`.
+    /// `bindings` receives the binding mode of each parsed field.
+    pub(super) fn parse_record_fields(
+        &mut self,
+        adt_ty: &str,
+        ident_span: Span,
+        parsed_where: bool,
+        mut bindings: Option<&mut ThinVec<BindingMode>>,
+    ) -> PResult<'a, (ThinVec<FieldDef>, Recovered)> {
         let mut fields = ThinVec::new();
         let mut recovered = Recovered::No;
         if self.eat(exp!(OpenBrace)) {
             while self.token != token::CloseBrace {
-                match self.parse_field_def(adt_ty, ident_span) {
+                match self.parse_field_def(adt_ty, ident_span, bindings.as_deref_mut()) {
                     Ok(field) => {
                         fields.push(field);
                     }
@@ -2320,13 +2333,55 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses an element of a struct declaration.
-    fn parse_field_def(&mut self, adt_ty: &str, ident_span: Span) -> PResult<'a, FieldDef> {
+    fn parse_field_def(
+        &mut self,
+        adt_ty: &str,
+        ident_span: Span,
+        bindings: Option<&mut ThinVec<BindingMode>>,
+    ) -> PResult<'a, FieldDef> {
         self.recover_vcs_conflict_marker();
         let attrs = self.parse_outer_attributes()?;
         self.recover_vcs_conflict_marker();
         self.collect_tokens(None, attrs, ForceCollect::No, |this, attrs| {
             let lo = this.token.span;
             let vis = this.parse_visibility(FollowedByType::No)?;
+            // In an anonymous struct, a field may start with the binding mode of the binding a
+            // parameter that is just the struct gives it, as in `fn f(ref mut x: u32)`: `mut`,
+            // `ref` or `ref mut`. `mut` followed by `(` is a `mut(..)` restriction instead.
+            let starts_binding = adt_ty == RECORD_ADT
+                && (this.token.is_keyword(kw::Ref)
+                    || this.token.is_keyword(kw::Mut)
+                        && !this.look_ahead(1, |t| *t == token::OpenParen));
+            let binding = if starts_binding {
+                let binding_lo = this.token.span;
+                let binding = if this.eat_keyword(exp!(Ref)) {
+                    BindingMode(
+                        ByRef::Yes(Pinnedness::Not, this.parse_mutability()),
+                        Mutability::Not,
+                    )
+                } else {
+                    this.bump(); // `mut`
+                    BindingMode::MUT
+                };
+                if bindings.is_none() {
+                    // Only a parameter that is just the struct binds its fields.
+                    let span = binding_lo.to(this.prev_token.span);
+                    this.dcx()
+                        .struct_span_err(
+                            span,
+                            format!("`{}` can't be used here", binding.prefix_str().trim_end()),
+                        )
+                        .with_span_label(span, "this anonymous struct doesn't bind its fields")
+                        .with_help(
+                            "bind the fields with a pattern instead, as in \
+                             `_ { ref x, .. }: struct { x: String }`",
+                        )
+                        .emit();
+                }
+                binding
+            } else {
+                BindingMode::NONE
+            };
             let mut_restriction = this.parse_mut_restriction()?;
             let safety = this.parse_unsafe_field();
             this.parse_single_struct_field(
@@ -2338,7 +2393,12 @@ impl<'a> Parser<'a> {
                 attrs,
                 ident_span,
             )
-            .map(|field| (field, Trailing::No, UsePreAttrPos::No))
+            .map(|field| {
+                if let Some(bindings) = bindings {
+                    bindings.push(binding);
+                }
+                (field, Trailing::No, UsePreAttrPos::No)
+            })
         })
     }
 
@@ -2487,7 +2547,7 @@ impl<'a> Parser<'a> {
         self.expect_field_ty_separator()?;
         // A field of an anonymous struct may be one too.
         let ty = if adt_ty == RECORD_ADT && self.is_record_ty_start() {
-            self.parse_record_ty()?
+            self.parse_record_ty(None)?
         } else {
             self.parse_ty()?
         };

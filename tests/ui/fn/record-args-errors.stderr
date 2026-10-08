@@ -1,47 +1,47 @@
 error[E0053]: field `times` of an anonymous struct parameter has an incompatible type for trait
-  --> $DIR/record-args-errors.rs:16:71
+  --> $DIR/record-args-errors.rs:16:52
    |
-LL |     fn write(&mut self, _ { data, times }: struct { data: u32, times: u32 }) {}
-   |                                                                       ^^^ expected `usize`, found `u32`
+LL |     fn write(&mut self, struct { data: u32, times: u32 }) {}
+   |                                                    ^^^ expected `usize`, found `u32`
    |
 note: type in trait
-  --> $DIR/record-args-errors.rs:11:48
+  --> $DIR/record-args-errors.rs:11:45
    |
-LL |     fn write(&mut self, _: struct { data: u32, times: usize = 1 });
-   |                                                ^^^^^^^^^^^^^^^^
+LL |     fn write(&mut self, struct { data: u32, times: usize = 1 });
+   |                                             ^^^^^^^^^^^^^^^^
 
 error: field `extra` is not a member of the trait's anonymous struct
-  --> $DIR/record-args-errors.rs:22:85
+  --> $DIR/record-args-errors.rs:22:59
    |
-LL |     fn write(&mut self, _ { data, times, extra }: struct { data: u32, times: usize, extra: u8 }) {}
-   |                                                                                     ^^^^^ not a member of the trait's anonymous struct
+LL |     fn write(&mut self, struct { data: u32, times: usize, extra: u8 }) {}
+   |                                                           ^^^^^ not a member of the trait's anonymous struct
 
 error: missing field `times` in anonymous struct parameter
-  --> $DIR/record-args-errors.rs:28:37
+  --> $DIR/record-args-errors.rs:28:25
    |
-LL |     fn write(&mut self, _: struct { data: u32, times: usize = 1 });
-   |                                                ---------------- `times` from trait
+LL |     fn write(&mut self, struct { data: u32, times: usize = 1 });
+   |                                             ---------------- `times` from trait
 ...
-LL |     fn write(&mut self, _ { data }: struct { data: u32 }) {}
-   |                                     ^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
+LL |     fn write(&mut self, struct { data: u32 }) {}
+   |                         ^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
 
 error: field `count` is not a member of the trait's anonymous struct
-  --> $DIR/record-args-errors.rs:35:64
+  --> $DIR/record-args-errors.rs:35:45
    |
-LL |     fn write(&mut self, _ { data, count }: struct { data: u32, count: usize }) {}
-   |                                                                ^^^^^
-   |                                                                |
-   |                                                                not a member of the trait's anonymous struct
-   |                                                                help: the trait's anonymous struct has a field named `times`
+LL |     fn write(&mut self, struct { data: u32, count: usize }) {}
+   |                                             ^^^^^
+   |                                             |
+   |                                             not a member of the trait's anonymous struct
+   |                                             help: the trait's anonymous struct has a field named `times`
 
 error: missing field `times` in anonymous struct parameter
-  --> $DIR/record-args-errors.rs:35:44
+  --> $DIR/record-args-errors.rs:35:25
    |
-LL |     fn write(&mut self, _: struct { data: u32, times: usize = 1 });
-   |                                                ---------------- `times` from trait
+LL |     fn write(&mut self, struct { data: u32, times: usize = 1 });
+   |                                             ---------------- `times` from trait
 ...
-LL |     fn write(&mut self, _ { data, count }: struct { data: u32, count: usize }) {}
-   |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
+LL |     fn write(&mut self, struct { data: u32, count: usize }) {}
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
 
 error: field `count` is not a member of the trait's anonymous struct
   --> $DIR/record-args-errors.rs:44:51
@@ -55,101 +55,101 @@ LL |     fn write(&mut self, args: struct { data: u32, count: usize }) {}
 error: missing field `times` in anonymous struct parameter
   --> $DIR/record-args-errors.rs:44:31
    |
-LL |     fn write(&mut self, _: struct { data: u32, times: usize = 1 });
-   |                                                ---------------- `times` from trait
+LL |     fn write(&mut self, struct { data: u32, times: usize = 1 });
+   |                                             ---------------- `times` from trait
 ...
 LL |     fn write(&mut self, args: struct { data: u32, count: usize }) {}
    |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
 
 error: field `dta` is not a member of the trait's anonymous struct
-  --> $DIR/record-args-errors.rs:51:52
+  --> $DIR/record-args-errors.rs:51:34
    |
-LL |     fn write(&mut self, _ { dta, times }: struct { dta: u32, times: usize }) {}
-   |                                                    ^^^ not a member of the trait's anonymous struct
+LL |     fn write(&mut self, struct { dta: u32, times: usize }) {}
+   |                                  ^^^ not a member of the trait's anonymous struct
    |
 help: a field with a similar name exists
    |
-LL |     fn write(&mut self, _ { dta, times }: struct { data: u32, times: usize }) {}
-   |                                                     +
+LL |     fn write(&mut self, struct { data: u32, times: usize }) {}
+   |                                   +
 
 error: default values are not allowed in trait impls
-  --> $DIR/record-args-errors.rs:57:79
+  --> $DIR/record-args-errors.rs:57:60
    |
-LL |     fn write(&mut self, _ { data, times }: struct { data: u32, times: usize = 2 }) {
-   |                                                                               ^ not allowed in a trait impl
+LL |     fn write(&mut self, struct { data: u32, times: usize = 2 }) {
+   |                                                            ^ not allowed in a trait impl
    |
 note: calls take the default of `times` from the trait
-  --> $DIR/record-args-errors.rs:11:63
+  --> $DIR/record-args-errors.rs:11:60
    |
-LL |     fn write(&mut self, _: struct { data: u32, times: usize = 1 });
-   |                                                               ^
+LL |     fn write(&mut self, struct { data: u32, times: usize = 1 });
+   |                                                            ^
 
 error: field `z` is not a member of the trait's anonymous struct
-  --> $DIR/record-args-errors.rs:69:60
+  --> $DIR/record-args-errors.rs:69:50
    |
-LL |     fn place(&self, _ { at }: struct { at: struct { x: u8, z: u32 = 1 } }) {}
-   |                                                            ^ not a member of the trait's anonymous struct
+LL |     fn place(&self, struct { at: struct { x: u8, z: u32 = 1 } }) {}
+   |                                                  ^ not a member of the trait's anonymous struct
    |
 help: a field with a similar name exists
    |
-LL -     fn place(&self, _ { at }: struct { at: struct { x: u8, z: u32 = 1 } }) {}
-LL +     fn place(&self, _ { at }: struct { at: struct { x: u8, y: u32 = 1 } }) {}
+LL -     fn place(&self, struct { at: struct { x: u8, z: u32 = 1 } }) {}
+LL +     fn place(&self, struct { at: struct { x: u8, y: u32 = 1 } }) {}
    |
 
 error[E0053]: field `x` of an anonymous struct parameter has an incompatible type for trait
-  --> $DIR/record-args-errors.rs:69:56
+  --> $DIR/record-args-errors.rs:69:46
    |
-LL |     fn place(&self, _ { at }: struct { at: struct { x: u8, z: u32 = 1 } }) {}
-   |                                                        ^^ expected `u32`, found `u8`
+LL |     fn place(&self, struct { at: struct { x: u8, z: u32 = 1 } }) {}
+   |                                              ^^ expected `u32`, found `u8`
    |
 note: type in trait
-  --> $DIR/record-args-errors.rs:65:46
+  --> $DIR/record-args-errors.rs:65:43
    |
-LL |     fn place(&self, _: struct { at: struct { x: u32, y: u32 = 0 } });
-   |                                              ^^^^^^
+LL |     fn place(&self, struct { at: struct { x: u32, y: u32 = 0 } });
+   |                                           ^^^^^^
 
 error: default values are not allowed in trait impls
-  --> $DIR/record-args-errors.rs:69:69
+  --> $DIR/record-args-errors.rs:69:59
    |
-LL |     fn place(&self, _ { at }: struct { at: struct { x: u8, z: u32 = 1 } }) {}
-   |                                                                     ^ not allowed in a trait impl
+LL |     fn place(&self, struct { at: struct { x: u8, z: u32 = 1 } }) {}
+   |                                                           ^ not allowed in a trait impl
    |
    = note: `z` has no default in the trait
 
 error: field `count` is not a member of the trait's anonymous struct
-  --> $DIR/record-args-errors.rs:115:60
+  --> $DIR/record-args-errors.rs:115:41
    |
-LL |     fn write(&self, _ { data, count }: struct { data: u32, count: usize }) {}
-   |                                                            ^^^^^
-   |                                                            |
-   |                                                            not a member of the trait's anonymous struct
-   |                                                            help: the trait's anonymous struct has a field named `times`
+LL |     fn write(&self, struct { data: u32, count: usize }) {}
+   |                                         ^^^^^
+   |                                         |
+   |                                         not a member of the trait's anonymous struct
+   |                                         help: the trait's anonymous struct has a field named `times`
 
 error: missing field `times` in anonymous struct parameter
-  --> $DIR/record-args-errors.rs:115:40
+  --> $DIR/record-args-errors.rs:115:21
    |
-LL |     fn write(&mut self, _: struct { data: u32, times: usize = 1 });
-   |                                                ---------------- `times` from trait
+LL |     fn write(&mut self, struct { data: u32, times: usize = 1 });
+   |                                             ---------------- `times` from trait
 ...
-LL |     fn write(&self, _ { data, count }: struct { data: u32, count: usize }) {}
-   |                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
+LL |     fn write(&self, struct { data: u32, count: usize }) {}
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `times` in implementation
 
 error[E0053]: method `write` has an incompatible type for trait
   --> $DIR/record-args-errors.rs:115:14
    |
-LL |     fn write(&self, _ { data, count }: struct { data: u32, count: usize }) {}
+LL |     fn write(&self, struct { data: u32, count: usize }) {}
    |              ^^^^^ types differ in mutability
    |
 note: type in trait
   --> $DIR/record-args-errors.rs:11:14
    |
-LL |     fn write(&mut self, _: struct { data: u32, times: usize = 1 });
+LL |     fn write(&mut self, struct { data: u32, times: usize = 1 });
    |              ^^^^^^^^^
-   = note: expected signature `fn(&mut RenamedAndMut, {record@$DIR/record-args-errors.rs:11:28: 11:34})`
-              found signature `fn(&RenamedAndMut, {record@$DIR/record-args-errors.rs:11:28: 11:34})`
+   = note: expected signature `fn(&mut RenamedAndMut, {record@$DIR/record-args-errors.rs:11:25: 11:31})`
+              found signature `fn(&RenamedAndMut, {record@$DIR/record-args-errors.rs:11:25: 11:31})`
 help: change the self-receiver type to match the trait
    |
-LL |     fn write(&mut self, _ { data, count }: struct { data: u32, count: usize }) {}
+LL |     fn write(&mut self, struct { data: u32, count: usize }) {}
    |               +++
 
 error[E0038]: the trait `Merge` is not dyn compatible
@@ -160,16 +160,16 @@ LL | fn merge_dyn(m: &dyn Merge) {}
    |
 note: for a trait to be dyn compatible it needs to allow building a vtable
       for more information, visit <https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility>
-  --> $DIR/record-args-errors.rs:127:32
+  --> $DIR/record-args-errors.rs:127:29
    |
 LL | trait Merge {
    |       ----- this trait is not dyn compatible...
 ...
-LL |     fn merge_unsized(&self, _: struct { other: Box<Self> });
-   |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^ ...because method `merge_unsized` references the `Self` type in this parameter
+LL |     fn merge_unsized(&self, struct { other: Box<Self> });
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ ...because method `merge_unsized` references the `Self` type in this parameter
    = help: consider moving `merge_unsized` to another trait
 
-error[E0063]: missing field `x` in initializer of `{record@$DIR/record-args-errors.rs:6:21: 6:27}`
+error[E0063]: missing field `x` in initializer of `{record@$DIR/record-args-errors.rs:6:9: 6:15}`
   --> $DIR/record-args-errors.rs:76:10
    |
 LL |     crop(_ { y: 2 });

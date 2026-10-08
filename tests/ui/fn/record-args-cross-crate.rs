@@ -2,7 +2,7 @@
 //@ edition: 2024
 //@ aux-build: record-args-lib.rs
 // Records (`#![feature(struct_args)]`) of another crate's functions and traits.
-#![feature(struct_args, default_field_values)]
+#![feature(struct_args, struct_args_pattern_elision, default_field_values)]
 #![allow(incomplete_features)]
 
 extern crate record_args_lib as lib;
@@ -11,7 +11,7 @@ use lib::{Draw, Writer};
 
 struct Loud;
 impl Writer for Loud {
-    fn write(&mut self, _ { data, times }: struct { data: &'static str, times: usize }) -> String {
+    fn write(&mut self, struct { data: &'static str, times: usize }) -> String {
         data.to_uppercase().repeat(times)
     }
 }

@@ -37,8 +37,9 @@ use crate::expectation::Expectation;
 use crate::gather_locals::DeclOrigin;
 use crate::{FnCtxt, diagnostics};
 
-/// Whether `qpath` is that of a struct pattern with an inferred path, `<_>::_ { x, y }`, written
-/// `_ { x, y }` (`#![feature(struct_args)]`), whose struct is its expected type.
+/// Whether `qpath` is that of a struct pattern with an inferred path, `<_>::_ { x, y }`, such as
+/// the pattern a parameter's anonymous struct implies (`#![feature(struct_args)]`), whose struct
+/// is its expected type.
 fn is_inferred_pat_path(qpath: &hir::QPath<'_>) -> bool {
     matches!(
         qpath,
@@ -2186,7 +2187,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         // In a trait impl, the type of a parameter's anonymous struct (`#![feature(struct_args)]`)
         // is the trait method's, and `compare_impl_item` reports the impl's fields that differ from
-        // it, which a pattern of the impl's fields also differs in.
+        // it, which the pattern the impl's fields imply also differs in.
         if (!inexistent_fields.is_empty() || !unmentioned_fields.is_empty())
             && tcx.is_record(adt.did())
             && let root = tcx.typeck_root_def_id(self.body_def_id.to_def_id())

@@ -2298,7 +2298,8 @@ impl Rewrite for ast::Param {
             (mk_sp(self.span.lo(), self.span.lo()), false, false)
         };
 
-        // A record parameter (`#![feature(struct_args)]`), `p: struct { x: u32 }`, is kept as
+        // A record parameter (`#![feature(struct_args)]`), `struct { x: u32 }` or
+        // `p: struct { x: u32 }`, whose pattern the parser may build from its fields, is kept as
         // written.
         if let ast::TyKind::Record(..) = self.ty.kind {
             let record = context.snippet(self.span);

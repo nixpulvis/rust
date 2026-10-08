@@ -461,6 +461,10 @@ pub fn check_crate(krate: &ast::Crate, sess: &Session, features: &Features) {
         "call as func((a, ...)) instead"
     );
     gate_all!(struct_args, "record parameters and arguments are experimental");
+    gate_all!(
+        struct_args_pattern_elision,
+        "leaving out an anonymous struct parameter's pattern is experimental"
+    );
     gate_all!(super_let, "`super let` is experimental");
     gate_all!(try_blocks_heterogeneous, "`try bikeshed` expression is experimental");
     gate_all!(unnamed_enum_variants, "unnamed enum variants are experimental");

@@ -15,6 +15,36 @@ error: expected one of `:` or `|`, found `)`
    |
 LL | fn inferred_pattern(_ { x: u32 }) {}
    |                                 ^ expected one of `:` or `|`
+   |
+help: to declare an anonymous struct parameter, write `struct`
+   |
+LL - fn inferred_pattern(_ { x: u32 }) {}
+LL + fn inferred_pattern(struct { x: u32 }) {}
+   |
 
-error: aborting due to 3 previous errors
+error: `ref` can't be used here
+  --> $DIR/record-args-parse-errors.rs:19:22
+   |
+LL | fn bound(p: struct { ref s: String, mut n: u32 }) {}
+   |                      ^^^ this anonymous struct doesn't bind its fields
+   |
+   = help: bind the fields with a pattern instead, as in `_ { ref x, .. }: struct { x: String }`
+
+error: `mut` can't be used here
+  --> $DIR/record-args-parse-errors.rs:19:37
+   |
+LL | fn bound(p: struct { ref s: String, mut n: u32 }) {}
+   |                                     ^^^ this anonymous struct doesn't bind its fields
+   |
+   = help: bind the fields with a pattern instead, as in `_ { ref x, .. }: struct { x: String }`
+
+error: `ref mut` can't be used here
+  --> $DIR/record-args-parse-errors.rs:22:33
+   |
+LL | fn nested(struct { at: struct { ref mut x: String } }) {}
+   |                                 ^^^^^^^ this anonymous struct doesn't bind its fields
+   |
+   = help: bind the fields with a pattern instead, as in `_ { ref x, .. }: struct { x: String }`
+
+error: aborting due to 6 previous errors
 

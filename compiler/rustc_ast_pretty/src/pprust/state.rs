@@ -1473,13 +1473,14 @@ impl<'a> State<'a> {
                 self.print_expr(expr, FixupContext::default());
                 self.pclose();
             }
-            ast::TyKind::Record(record) => self.print_record(record),
+            ast::TyKind::Record(record) => self.print_record(record, &[]),
         }
         self.end(ib);
     }
 
-    /// Prints an anonymous struct, `struct { x: u32, y: u32 = 0 }`.
-    fn print_record(&mut self, record: &ast::RecordTy) {
+    /// Prints an anonymous struct, `struct { x: u32, ref mut y: u32 = 0 }`, whose fields named in
+    /// `bindings` are bound with the binding modes there.
+    fn print_record(&mut self, record: &ast::RecordTy, bindings: &[(Ident, BindingMode)]) {
         self.word_nbsp("struct");
         self.word("{");
         if record.fields.is_empty() {
@@ -1490,6 +1491,9 @@ impl<'a> State<'a> {
         self.commasep(Inconsistent, &record.fields, |s, field| {
             s.print_outer_attributes(&field.attrs);
             if let Some(ident) = field.ident {
+                if let Some((_, binding)) = bindings.iter().find(|(name, _)| *name == ident) {
+                    s.word(binding.prefix_str());
+                }
                 s.print_ident(ident);
                 s.word_nbsp(":");
             }
@@ -1502,6 +1506,32 @@ impl<'a> State<'a> {
         });
         self.nbsp();
         self.word("}");
+    }
+
+    /// Prints a parameter whose type is an anonymous struct. One that is just its type,
+    /// `struct { x: u32 }`, whose type implies its pattern (both have the type's span), prints as
+    /// written rather than as that pattern and its type.
+    fn print_record_param(&mut self, input: &ast::Param, record: &ast::RecordTy) {
+        if input.pat.span != input.ty.span {
+            self.print_pat(&input.pat);
+            self.word(":");
+            self.space();
+            self.print_record(record, &[]);
+            return;
+        }
+        let bindings: Vec<_> = match &input.pat.kind {
+            PatKind::Struct(_, _, fields, _) => fields
+                .iter()
+                .filter_map(|f| match f.pat.kind {
+                    PatKind::Ident(binding, ..) if binding != BindingMode::NONE => {
+                        Some((f.ident, binding))
+                    }
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        self.print_record(record, &bindings);
     }
 
     fn print_trait_ref(&mut self, t: &ast::TraitRef) {
@@ -2277,8 +2307,9 @@ impl<'a> State<'a> {
 
         self.print_outer_attributes_inline(&input.attrs);
 
-        match input.ty.kind {
+        match &input.ty.kind {
             ast::TyKind::Infer if is_closure => self.print_pat(&input.pat),
+            ast::TyKind::Record(record) => self.print_record_param(input, record),
             _ => {
                 if let Some(eself) = input.to_self() {
                     self.print_explicit_self(&eself);

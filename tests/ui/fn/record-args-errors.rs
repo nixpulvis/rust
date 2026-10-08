@@ -1,38 +1,38 @@
 //@ edition: 2024
 // Errors for anonymous struct parameters and inferred struct literals (`#![feature(struct_args)]`).
-#![feature(struct_args, default_field_values)]
+#![feature(struct_args, struct_args_pattern_elision, default_field_values)]
 #![allow(incomplete_features)]
 
-fn crop(_ { x, y }: struct { x: u32, y: u32 = 1 }) -> u32 {
+fn crop(struct { x: u32, y: u32 = 1 }) -> u32 {
     x + y
 }
 
 trait Writer {
-    fn write(&mut self, _: struct { data: u32, times: usize = 1 });
+    fn write(&mut self, struct { data: u32, times: usize = 1 });
 }
 
 struct WrongType;
 impl Writer for WrongType {
-    fn write(&mut self, _ { data, times }: struct { data: u32, times: u32 }) {}
+    fn write(&mut self, struct { data: u32, times: u32 }) {}
     //~^ ERROR field `times` of an anonymous struct parameter has an incompatible type for trait
 }
 
 struct ExtraField;
 impl Writer for ExtraField {
-    fn write(&mut self, _ { data, times, extra }: struct { data: u32, times: usize, extra: u8 }) {}
+    fn write(&mut self, struct { data: u32, times: usize, extra: u8 }) {}
     //~^ ERROR field `extra` is not a member of the trait's anonymous struct
 }
 
 struct MissingField;
 impl Writer for MissingField {
-    fn write(&mut self, _ { data }: struct { data: u32 }) {}
+    fn write(&mut self, struct { data: u32 }) {}
     //~^ ERROR missing field `times` in anonymous struct parameter
 }
 
 // A renamed field is reported by name.
 struct RenamedField;
 impl Writer for RenamedField {
-    fn write(&mut self, _ { data, count }: struct { data: u32, count: usize }) {}
+    fn write(&mut self, struct { data: u32, count: usize }) {}
     //~^ ERROR field `count` is not a member of the trait's anonymous struct
     //~| ERROR missing field `times` in anonymous struct parameter
 }
@@ -48,13 +48,13 @@ impl Writer for BoundRenamedField {
 
 struct MisspelledField;
 impl Writer for MisspelledField {
-    fn write(&mut self, _ { dta, times }: struct { dta: u32, times: usize }) {}
+    fn write(&mut self, struct { dta: u32, times: usize }) {}
     //~^ ERROR field `dta` is not a member of the trait's anonymous struct
 }
 
 struct Default;
 impl Writer for Default {
-    fn write(&mut self, _ { data, times }: struct { data: u32, times: usize = 2 }) {
+    fn write(&mut self, struct { data: u32, times: usize = 2 }) {
         //~^ ERROR default values are not allowed in trait impls
         let _ = (data, times);
     }
@@ -62,11 +62,11 @@ impl Writer for Default {
 
 // The fields of nested anonymous structs are checked against the trait's too.
 trait Place {
-    fn place(&self, _: struct { at: struct { x: u32, y: u32 = 0 } });
+    fn place(&self, struct { at: struct { x: u32, y: u32 = 0 } });
 }
 struct NestedMismatch;
 impl Place for NestedMismatch {
-    fn place(&self, _ { at }: struct { at: struct { x: u8, z: u32 = 1 } }) {}
+    fn place(&self, struct { at: struct { x: u8, z: u32 = 1 } }) {}
     //~^ ERROR field `z` is not a member of the trait's anonymous struct
     //~| ERROR default values are not allowed in trait impls
     //~| ERROR field `x` of an anonymous struct parameter has an incompatible type for trait
@@ -112,7 +112,7 @@ fn inferred_patterns(p: Point, q: Point) {
 // A renamed field doesn't hide other differences from the trait's method.
 struct RenamedAndMut;
 impl Writer for RenamedAndMut {
-    fn write(&self, _ { data, count }: struct { data: u32, count: usize }) {}
+    fn write(&self, struct { data: u32, count: usize }) {}
     //~^ ERROR method `write` has an incompatible type for trait
     //~| ERROR field `count` is not a member of the trait's anonymous struct
     //~| ERROR missing field `times` in anonymous struct parameter
@@ -121,10 +121,10 @@ impl Writer for RenamedAndMut {
 // A field of an anonymous struct using `Self` makes its method not dyn compatible, as a parameter
 // would.
 trait Merge {
-    fn merge(&self, _: struct { other: Self, times: usize = 1 })
+    fn merge(&self, struct { other: Self, times: usize = 1 })
     where
         Self: Sized;
-    fn merge_unsized(&self, _: struct { other: Box<Self> });
+    fn merge_unsized(&self, struct { other: Box<Self> });
 }
 fn merge_dyn(m: &dyn Merge) {}
 //~^ ERROR the trait `Merge` is not dyn compatible

@@ -158,6 +158,17 @@ impl<'a> Parser<'a> {
             self.parse_fn_body(attrs, &ident, &mut sig_hi, fn_parse_mode.req_body, fn_params_end)?;
         let fn_sig_span = sig_lo.to(sig_hi);
         Self::set_record_visibility(&mut decl, vis);
+        // A function without a body has no patterns, so a parameter's anonymous struct doesn't
+        // bind its fields.
+        if body.is_none() {
+            for param in &mut decl.inputs {
+                if let TyKind::Record(_) = param.ty.kind
+                    && let PatKind::Struct(..) = param.pat.kind
+                {
+                    param.pat.kind = PatKind::Wild;
+                }
+            }
+        }
         Ok((ident, FnSig { header, decl, span: fn_sig_span }, generics, contract, body))
     }
 
@@ -167,10 +178,15 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses an anonymous struct type, `struct { x: u32, y: u32 = 0 }` (see `TyKind::Record`).
-    pub(super) fn parse_record_ty(&mut self) -> PResult<'a, Box<Ty>> {
+    /// With `bindings`, its fields may start with a binding mode, `mut`, `ref` or `ref mut`, and
+    /// `bindings` receives the binding mode of each.
+    pub(super) fn parse_record_ty(
+        &mut self,
+        bindings: Option<&mut ThinVec<BindingMode>>,
+    ) -> PResult<'a, Box<Ty>> {
         let lo = self.token.span;
         self.bump(); // `struct`
-        let (fields, recovered) = self.parse_record_struct_body(RECORD_ADT, lo, true)?;
+        let (fields, recovered) = self.parse_record_fields(RECORD_ADT, lo, true, bindings)?;
         let span = lo.to(self.prev_token.span);
         self.psess.gated_spans.gate(sym::struct_args, span);
         Ok(self.mk_record_ty(lo, span, fields, recovered))
@@ -188,6 +204,60 @@ impl<'a> Parser<'a> {
         let vis = Visibility { kind: VisibilityKind::Inherited, span: lo.shrink_to_lo() };
         let record = RecordTy { id: DUMMY_NODE_ID, vis, fields, recovered, ident_span: lo };
         self.mk_ty(span, TyKind::Record(Box::new(record)))
+    }
+
+    /// Parses a parameter that is just an anonymous struct, `struct { x: u32, y: u32 = 0 }`
+    /// (`#![feature(struct_args_pattern_elision)]`). Its type implies its pattern,
+    /// `<_>::_ { x, y }`, which binds the fields, and whose struct type checking takes from the
+    /// parameter.
+    fn parse_record_param(&mut self, attrs: AttrVec) -> PResult<'a, Param> {
+        let mut bindings = ThinVec::new();
+        let ty = self.parse_record_ty(Some(&mut bindings))?;
+        self.psess.gated_spans.gate(sym::struct_args_pattern_elision, ty.span);
+        Ok(self.mk_record_param(attrs, ty, bindings))
+    }
+
+    /// Makes a parameter of the anonymous struct `ty`, with the pattern its fields imply (see
+    /// `parse_record_param`), whose bindings have the binding modes in `bindings`.
+    fn mk_record_param(
+        &mut self,
+        attrs: AttrVec,
+        ty: Box<Ty>,
+        bindings: ThinVec<BindingMode>,
+    ) -> Param {
+        let TyKind::Record(record) = &ty.kind else { unreachable!("not an anonymous struct") };
+        let lo = record.ident_span;
+        let pat_fields = record
+            .fields
+            .iter()
+            .zip(bindings)
+            .filter_map(|(field, binding)| Some((field.ident?, binding)))
+            .map(|(ident, binding)| PatField {
+                ident,
+                pat: Box::new(self.mk_pat_ident(ident.span, binding, ident)),
+                is_shorthand: true,
+                attrs: AttrVec::new(),
+                id: DUMMY_NODE_ID,
+                span: ident.span,
+                is_placeholder: false,
+            })
+            .collect();
+        let qself = Box::new(QSelf {
+            ty: self.mk_ty(lo, TyKind::Infer),
+            path_span: lo.shrink_to_lo(),
+            position: 0,
+        });
+        let path = Path::from_ident(Ident::new(kw::Underscore, lo));
+        let pat = self
+            .mk_pat(ty.span, PatKind::Struct(Some(qself), path, pat_fields, PatFieldsRest::None));
+        Param {
+            attrs,
+            span: ty.span,
+            ty,
+            pat: Box::new(pat),
+            id: DUMMY_NODE_ID,
+            is_placeholder: false,
+        }
     }
 
     /// Gives the anonymous structs of a function's parameters, and those of their fields, the
@@ -797,6 +867,10 @@ impl<'a> Parser<'a> {
                 fn_parse_mode.context,
                 FnContext::Free | FnContext::Impl | FnContext::Trait
             );
+            if is_fn_item && this.is_record_ty_start() {
+                let param = this.parse_record_param(attrs)?;
+                return Ok((param, Trailing::No, UsePreAttrPos::No));
+            }
 
             let is_dot_dot_dot = if this.token.kind == token::DotDotDot {
                 IsDotDotDot::Yes
@@ -823,10 +897,25 @@ impl<'a> Parser<'a> {
                 let (pat, colon) = this.parse_fn_param_pat_colon()?;
                 // `p: struct { .. }` is an ordinary `pat: ty`, which only binds `p`.
                 if colon && is_fn_item && this.is_record_ty_start() {
-                    (pat, this.parse_record_ty()?)
+                    (pat, this.parse_record_ty(None)?)
                 } else {
                     if !colon {
                         let mut err = this.unexpected().unwrap_err();
+                        // `_ { x: u32 }` is a struct pattern with an inferred path, not an
+                        // anonymous struct, which is spelled `struct { x: u32 }`.
+                        if is_fn_item
+                            && let PatKind::Struct(Some(_), path, ..) = &pat.kind
+                            && let [segment] = &path.segments[..]
+                            && segment.ident.name == kw::Underscore
+                            && matches!(this.token.kind, token::Comma | token::CloseParen)
+                        {
+                            err.span_suggestion_verbose(
+                                segment.ident.span,
+                                "to declare an anonymous struct parameter, write `struct`",
+                                "struct",
+                                Applicability::MaybeIncorrect,
+                            );
+                        }
                         let pat_span = pat.span;
                         return if let Some(ident) = this.parameter_without_type(
                             &mut err,

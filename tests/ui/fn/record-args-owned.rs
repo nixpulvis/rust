@@ -2,14 +2,14 @@
 //@ edition: 2024
 // A record (`#![feature(struct_args)]`) is a child of its function and shares its generics, so its
 // fields, and their defaults, can use anything the function's signature can.
-#![feature(struct_args, default_field_values)]
+#![feature(struct_args, struct_args_pattern_elision, default_field_values)]
 #![allow(incomplete_features)]
 
 use std::borrow::Cow;
 use std::fmt::Debug;
 
 // A lifetime elided in a path, in a field with a default.
-fn label(_ { s, n }: struct { s: Cow<str> = Cow::Borrowed("none"), n: usize = 1 }) -> String {
+fn label(struct { s: Cow<str> = Cow::Borrowed("none"), n: usize = 1 }) -> String {
     s.repeat(n)
 }
 
@@ -17,31 +17,23 @@ fn label(_ { s, n }: struct { s: Cow<str> = Cow::Borrowed("none"), n: usize = 1 
 #[derive(Debug, PartialEq)]
 struct Point(i32, i32);
 impl Point {
-    fn with(
-        &self,
-        _ { other, scale }: struct { other: Option<Self> = None, scale: i32 = 1 },
-    ) -> Self {
+    fn with(&self, struct { other: Option<Self> = None, scale: i32 = 1 }) -> Self {
         let other = other.unwrap_or(Point(0, 0));
         Point(self.0 + other.0 * scale, self.1 + other.1 * scale)
     }
 }
 
-fn first<I: Iterator<Item: Debug>>(
-    _ { iter, fallback }: struct { iter: I, fallback: Option<I::Item> = None },
-) -> String {
+fn first<I: Iterator<Item: Debug>>(struct { iter: I, fallback: Option<I::Item> = None }) -> String {
     let mut iter = iter;
     format!("{:?}", iter.next().or(fallback))
 }
 
 // In traits, defaults can use the trait's and the method's generic parameters and lifetimes.
 trait Collect<T> {
-    fn collect<'a>(
-        &self,
-        _: struct { items: Vec<T> = Vec::new(), label: &'a str = "items" },
-    ) -> String;
+    fn collect<'a>(&self, struct { items: Vec<T> = Vec::new(), label: &'a str = "items" }) -> String;
 }
 impl<T: Debug> Collect<T> for () {
-    fn collect<'a>(&self, _ { label, items }: struct { label: &'a str, items: Vec<T> }) -> String {
+    fn collect<'a>(&self, struct { label: &'a str, items: Vec<T> }) -> String {
         format!("{label}: {items:?}")
     }
 }
@@ -49,7 +41,7 @@ impl<T: Debug> Collect<T> for () {
 // The impl's generic parameters are the record's too.
 struct Wrapper<T>(Vec<T>);
 impl<T: Clone> Wrapper<T> {
-    fn push(&mut self, _ { value, times }: struct { value: T, times: usize = 1 }) {
+    fn push(&mut self, struct { value: T, times: usize = 1 }) {
         for _ in 0..times {
             self.0.push(value.clone());
         }
@@ -59,7 +51,7 @@ impl<T: Clone> Wrapper<T> {
 // Functions with records from macros, as items, in impls, and in traits.
 macro_rules! double {
     ($name:ident) => {
-        fn $name(_ { v }: struct { v: u32 }) -> u32 {
+        fn $name(struct { v: u32 }) -> u32 {
             v * 2
         }
     };
@@ -68,7 +60,7 @@ double!(double_free);
 
 macro_rules! method {
     () => {
-        fn scaled(&self, _ { by }: struct { by: u32 = 2 }) -> u32 {
+        fn scaled(&self, struct { by: u32 = 2 }) -> u32 {
             self.0 * by
         }
     };
@@ -80,30 +72,30 @@ impl Num {
 
 macro_rules! trait_method {
     () => {
-        fn shout(&self, _: struct { times: usize = 1 }) -> String;
+        fn shout(&self, struct { times: usize = 1 }) -> String;
     };
 }
 trait Shout {
     trait_method!();
 }
 impl Shout for &str {
-    fn shout(&self, _ { times }: struct { times: usize }) -> String {
+    fn shout(&self, struct { times: usize }) -> String {
         self.to_uppercase().repeat(times)
     }
 }
 
 // Functions with records under `#[cfg]`.
 #[cfg(false)]
-fn configured(_ { a }: struct { a: u32 }) -> u32 {
+fn configured(struct { a: u32 }) -> u32 {
     a
 }
 #[cfg(not(false))]
-fn configured(_ { b }: struct { b: u32 = 3 }) -> u32 {
+fn configured(struct { b: u32 = 3 }) -> u32 {
     b
 }
 
 // Async functions.
-async fn delayed(_ { v, extra }: struct { v: u32, extra: u32 = 1 }) -> u32 {
+async fn delayed(struct { v: u32, extra: u32 = 1 }) -> u32 {
     v + extra
 }
 
