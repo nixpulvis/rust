@@ -428,6 +428,7 @@ impl<'a> ExtCtxt<'a> {
                 path,
                 fields,
                 rest: ast::StructRest::None,
+                is_named_args: false,
             })),
         )
     }

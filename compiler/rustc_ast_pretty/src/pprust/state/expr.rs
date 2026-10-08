@@ -146,8 +146,26 @@ impl<'a> State<'a> {
     }
 
     fn print_expr_struct(&mut self, se: &ast::StructExpr) {
-        let ast::StructExpr { qself, path, fields, rest } = se;
+        let ast::StructExpr { qself, path, fields, rest, is_named_args } = se;
         let is_inferred = super::is_inferred_struct_path(qself, path);
+        // Named arguments, `f(x: 1, ..)` (`#![feature(named_arguments)]`), print as written.
+        if *is_named_args {
+            self.commasep(Inconsistent, fields, |s, field| {
+                s.print_ident(field.ident);
+                s.word_nbsp(":");
+                s.print_expr(&field.expr, FixupContext::default());
+            });
+            if let ast::StructRest::Base(_) | ast::StructRest::Rest(_) = rest {
+                if !fields.is_empty() {
+                    self.word_space(",");
+                }
+                self.word("..");
+                if let ast::StructRest::Base(expr) = rest {
+                    self.print_expr(expr, FixupContext::default());
+                }
+            }
+            return;
+        }
         if is_inferred {
             self.word("_");
         } else if let Some(qself) = qself {

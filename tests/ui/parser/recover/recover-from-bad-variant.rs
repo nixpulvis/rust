@@ -5,7 +5,8 @@ enum Enum {
 
 fn main() {
     let x = Enum::Foo(a: 3, b: 4);
-    //~^ ERROR invalid `struct` delimiters or `fn` call arguments
+    //~^ ERROR named arguments are experimental
+    //~| ERROR expected value, found struct variant `Enum::Foo`
     match x {
         Enum::Foo(a, b) => {}
         //~^ ERROR expected tuple struct or tuple variant, found struct variant `Enum::Foo`

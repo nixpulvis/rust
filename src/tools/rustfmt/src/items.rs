@@ -2877,6 +2877,23 @@ fn rewrite_params(
             .trim();
         return Ok(comment.to_owned());
     }
+    // A `;` in the parameter list starts the fields of a last anonymous struct parameter
+    // (`#![feature(named_arguments)]`), so the list isn't comma-separated.
+    let (last, positional) = params.split_last().unwrap();
+    if let ast::TyKind::Record(ref record) = last.ty.kind {
+        if context.snippet(last.span).starts_with(';') {
+            return rewrite_semi_params(
+                context,
+                positional,
+                record,
+                one_line_budget,
+                multi_line_budget,
+                indent,
+                param_indent,
+                span,
+            );
+        }
+    }
     let param_items: Vec<_> = itemize_list(
         context.snippet_provider,
         params.iter(),
@@ -2926,6 +2943,63 @@ fn rewrite_params(
         .ends_with_newline(tactic.ends_with_newline(context.config.indent_style()))
         .preserve_newline(true);
     write_list(&param_items, &fmt)
+}
+
+/// Rewrites a parameter list whose last parameter is the fields after a `;`
+/// (`#![feature(named_arguments)]`), `positional` being the others. It is `a: u32; x: u32` on
+/// one line, or else one parameter per line with the `;` on a line of its own, so adding or
+/// removing a parameter on either side of it only changes that parameter's line. A list with
+/// comments is kept as written.
+fn rewrite_semi_params(
+    context: &RewriteContext<'_>,
+    positional: &[ast::Param],
+    record: &ast::RecordTy,
+    one_line_budget: usize,
+    multi_line_budget: usize,
+    indent: Indent,
+    param_indent: Indent,
+    span: Span,
+) -> RewriteResult {
+    // to remove ')'
+    let snippet = context
+        .snippet(mk_sp(span.lo(), span.hi() - BytePos(1)))
+        .trim();
+    if contains_comment(snippet) {
+        return Ok(snippet.to_owned());
+    }
+    let shape = Shape::legacy(multi_line_budget, param_indent);
+    let positional = positional
+        .iter()
+        .map(|param| param.rewrite_result(context, shape))
+        .collect::<Result<Vec<_>, _>>()?;
+    // A field's span includes its `mut`, which binds it mutably.
+    let fields: Vec<_> = record
+        .fields
+        .iter()
+        .map(|field| context.snippet(field.span).trim().to_owned())
+        .collect();
+
+    let mut one_line = positional.join(", ");
+    one_line.push(';');
+    if !fields.is_empty() {
+        one_line.push(' ');
+        one_line.push_str(&fields.join(", "));
+    }
+    if !one_line.contains('\n') && one_line.len() <= one_line_budget {
+        return Ok(one_line);
+    }
+
+    let indent = match context.config.indent_style() {
+        IndentStyle::Block => indent.block_indent(context.config),
+        IndentStyle::Visual => param_indent,
+    };
+    let lines: Vec<_> = positional
+        .iter()
+        .map(|param| format!("{param},"))
+        .chain(std::iter::once(";".to_owned()))
+        .chain(fields.iter().map(|field| format!("{field},")))
+        .collect();
+    Ok(lines.join(&indent.to_string_with_newline(context.config)))
 }
 
 fn compute_budgets_for_params(

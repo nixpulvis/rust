@@ -53,6 +53,12 @@ use crate::{
     TupleArgumentsFlag, cast, fatally_break_rust, type_error_struct,
 };
 
+/// Whether `expr` is named arguments, `f(x: 1)` (`#![feature(named_arguments)]`), lowered to
+/// `_ { x: 1, .. }`. Only for wording diagnostics: type checking treats them as that literal.
+fn is_named_args(expr: &hir::Expr<'_>) -> bool {
+    expr.span.is_desugaring(DesugaringKind::NamedArgs)
+}
+
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     pub(crate) fn precedence(&self, expr: &hir::Expr<'_>) -> ExprPrecedence {
         let has_attr = |id: HirId| -> bool {
@@ -1882,6 +1888,36 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 Ok((adt.non_enum_variant(), ty))
             }
             ty::Error(guar) => Err(guar),
+            _ if is_named_args(expr) => {
+                let mut err = struct_span_code_err!(
+                    self.dcx(),
+                    path_span,
+                    E0071,
+                    "named arguments need a record parameter, but this parameter has type `{ty}`"
+                );
+                err.span_label(path_span, format!("expected `{ty}`"));
+                if let hir::ExprKind::Struct(_, [field], _) = expr.kind {
+                    if let Ok(value) = self.tcx.sess.source_map().span_to_snippet(field.expr.span) {
+                        err.span_suggestion_verbose(
+                            path_span,
+                            "pass the argument by position",
+                            value,
+                            Applicability::MaybeIncorrect,
+                        );
+                    }
+                    err.help(format!(
+                        "or, to take it by name, declare the parameter as an anonymous struct: \
+                         `struct {{ {}: {ty} }}`",
+                        field.ident
+                    ));
+                } else {
+                    err.note(
+                        "named arguments are passed to a function's last parameter, which must \
+                         be a struct, such as an anonymous struct `struct { .. }`",
+                    );
+                }
+                Err(err.emit_err())
+            }
             _ => Err(struct_span_code_err!(
                 self.dcx(),
                 path_span,
@@ -2046,7 +2082,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         }
                     }
                 }
-                if !self.tcx.features().default_field_values() {
+                // Named arguments imply `..` under their own feature, `named_arguments`.
+                if !self.tcx.features().default_field_values()
+                    && !span.is_desugaring(DesugaringKind::NamedArgs)
+                {
                     let sugg = self.tcx.crate_level_attribute_injection_span();
                     self.dcx().emit_err(BaseExpressionDoubleDot {
                         span: span.shrink_to_hi(),
@@ -2091,16 +2130,27 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 if !missing_mandatory_fields.is_empty() {
                     let s = pluralize!(missing_mandatory_fields.len());
                     let fields = listify(&missing_mandatory_fields, |f| format!("`{f}`")).unwrap();
-                    self.dcx()
-                        .struct_span_err(
-                            span.shrink_to_lo(),
-                            format!("missing field{s} {fields} in initializer"),
-                        )
-                        .with_span_label(
-                            span.shrink_to_lo(),
-                            "fields that do not have a defaulted value must be provided explicitly",
-                        )
-                        .emit();
+                    // Named arguments, `f(x: 1)`, have no `..` of their own to point at.
+                    let err = if span.is_desugaring(DesugaringKind::NamedArgs) {
+                        self.dcx()
+                            .struct_span_err(
+                                expr.span,
+                                format!("missing named argument{s} {fields}"),
+                            )
+                            .with_span_label(expr.span, format!("missing {fields}"))
+                    } else {
+                        self.dcx()
+                            .struct_span_err(
+                                span.shrink_to_lo(),
+                                format!("missing field{s} {fields} in initializer"),
+                            )
+                            .with_span_label(
+                                span.shrink_to_lo(),
+                                "fields that do not have a defaulted value must be provided \
+                                 explicitly",
+                            )
+                    };
+                    err.emit();
                     return;
                 }
                 let fru_tys = match adt_ty.kind() {

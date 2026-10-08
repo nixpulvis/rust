@@ -253,6 +253,10 @@ declare_features! (
     (internal, link_enzyme_intrinsics, "CURRENT_RUSTC_VERSION", None),
     /// Allows using `?Trait` trait bounds in more contexts.
     (internal, more_maybe_bounds, "1.82.0", None),
+    /// Allows sugar for record parameters and arguments (needs `struct_args`): named arguments,
+    /// `f(a, x: 1)`, leaving out a record argument whose fields all have defaults, `f(a)`, and
+    /// `;` in parameter lists, `fn f(a: u32; x: u32)`.
+    (incomplete, named_arguments, "CURRENT_RUSTC_VERSION", None),
     /// Allow negative trait bounds. This is an internal-only feature for testing the trait solver!
     (internal, negative_bounds, "1.71.0", None),
     /// Set the maximum pattern complexity allowed (not limited by default).
