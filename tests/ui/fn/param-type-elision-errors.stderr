@@ -1,0 +1,74 @@
+error[E0573]: expected type, found variant `Shape::Square`
+  --> $DIR/param-type-elision-errors.rs:25:19
+   |
+LL | fn variant_elided(Shape::Square(side)) {}
+   |                   ^^^^^^^^^^^^^ a variant, not a type
+   |
+   = note: a parameter's type can only be left out when its pattern names a type, and a variant pattern names a variant
+help: write the parameter's type
+   |
+LL | fn variant_elided(Shape::Square(side): Shape) {}
+   |                                      +++++++
+
+error[E0573]: expected type, found variant `Shape::Square`
+  --> $DIR/param-type-elision-errors.rs:27:24
+   |
+LL | fn variant_elided_ref(&Shape::Square(side)) {}
+   |                        ^^^^^^^^^^^^^ a variant, not a type
+   |
+   = note: a parameter's type can only be left out when its pattern names a type, and a variant pattern names a variant
+help: write the parameter's type
+   |
+LL | fn variant_elided_ref(&Shape::Square(side): &Shape) {}
+   |                                           ++++++++
+
+error[E0573]: expected type, found variant `Square`
+  --> $DIR/param-type-elision-errors.rs:31:32
+   |
+LL |     fn variant_elided_imported(Square(side)) {}
+   |                                ^^^^^^ a variant, not a type
+   |
+   = note: a parameter's type can only be left out when its pattern names a type, and a variant pattern names a variant
+help: write the parameter's type
+   |
+LL |     fn variant_elided_imported(Square(side): Shape) {}
+   |                                            +++++++
+
+error[E0573]: expected type, found variant `Shape2::Square`
+  --> $DIR/param-type-elision-errors.rs:40:29
+   |
+LL | fn variant_elided_refutable(Shape2::Square(side)) {}
+   |                             ^^^^^^^^^^^^^^ a variant, not a type
+   |
+   = note: a parameter's type can only be left out when its pattern names a type, and a variant pattern names a variant
+   = help: a parameter's pattern has to match every `Shape2`, and this one doesn't match its other variants, so take a `Shape2` and match on it in the body
+
+error[E0107]: missing generics for struct `Pair`
+  --> $DIR/param-type-elision-errors.rs:10:22
+   |
+LL | fn generic_elided<T>(Pair { a, b }) {}
+   |                      ^^^^ expected 1 generic argument
+   |
+note: struct defined here, with 1 generic parameter: `T`
+  --> $DIR/param-type-elision-errors.rs:6:8
+   |
+LL | struct Pair<T> {
+   |        ^^^^ -
+help: add missing generic argument
+   |
+LL | fn generic_elided<T>(Pair<T> { a, b }) {}
+   |                          +++
+
+error[E0308]: mismatched types
+  --> $DIR/param-type-elision-errors.rs:17:24
+   |
+LL | fn mixed_array([Px(a), Py(b)]) {}
+   |                --------^^^^^-
+   |                |       |
+   |                |       expected `Px`, found `Py`
+   |                expected due to this
+
+error: aborting due to 6 previous errors
+
+Some errors have detailed explanations: E0107, E0308, E0573.
+For more information about an error, try `rustc --explain E0107`.

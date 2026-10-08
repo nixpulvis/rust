@@ -128,6 +128,10 @@ bitflags::bitflags! {
         /// Used to detect a missing `else` in a let statement.
         /// e.g. let Some(foo) = bar{return;};
         const IN_LET            = 1 << 6;
+        /// Allows generic arguments without a turbofish in the paths of a function parameter's
+        /// pattern, as in `fn f(Pair<T> { a, b })`, where they spell its type
+        /// (`#![feature(parameter_type_elision)]`).
+        const IN_PARAM_PAT      = 1 << 7;
     }
 }
 

@@ -2298,6 +2298,16 @@ impl Rewrite for ast::Param {
             (mk_sp(self.span.lo(), self.span.lo()), false, false)
         };
 
+        // A pattern that spells out the parameter's type (`#![feature(parameter_type_elision)]`):
+        // `Point { x, y }` for `Point { x, y }: Point` is formatted without the type.
+        if self.has_elided_ty() {
+            let pat = self.pat.rewrite_result(context, shape)?;
+            return Ok(if param_attrs_result.is_empty() {
+                pat
+            } else {
+                format!("{param_attrs_result} {pat}")
+            });
+        }
         if let Some(ref explicit_self) = self.to_self() {
             rewrite_explicit_self(
                 context,
@@ -2447,6 +2457,7 @@ pub(crate) fn span_lo_for_param(param: &ast::Param) -> BytePos {
 
 pub(crate) fn span_hi_for_param(context: &RewriteContext<'_>, param: &ast::Param) -> BytePos {
     match param.ty.kind {
+        _ if param.has_elided_ty() => param.pat.span.hi(),
         ast::TyKind::Infer if context.snippet(param.ty.span) == "_" => param.ty.span.hi(),
         ast::TyKind::Infer if is_named_param(param) => param.pat.span.hi(),
         _ => param.ty.span.hi(),
@@ -2872,7 +2883,13 @@ fn rewrite_params(
         ")",
         ",",
         |param| span_lo_for_param(param),
-        |param| param.ty.span.hi(),
+        |param| {
+            if param.has_elided_ty() {
+                param.pat.span.hi()
+            } else {
+                param.ty.span.hi()
+            }
+        },
         |param| {
             param
                 .rewrite_result(context, Shape::legacy(multi_line_budget, param_indent))

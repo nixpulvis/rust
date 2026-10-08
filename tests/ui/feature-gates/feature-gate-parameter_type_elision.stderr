@@ -1,0 +1,30 @@
+error[E0658]: parameter type elision is experimental
+  --> $DIR/feature-gate-parameter_type_elision.rs:10:6
+   |
+LL | fn f(Args { y }) -> u32 {
+   |      ^^^^^^^^^^
+   |
+   = help: add `#![feature(parameter_type_elision)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error[E0658]: parameter type elision is experimental
+  --> $DIR/feature-gate-parameter_type_elision.rs:16:6
+   |
+LL | fn g((&Args { y }, Pair(a, b))) -> u32 {
+   |      ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: add `#![feature(parameter_type_elision)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error[E0658]: parameter type elision is experimental
+  --> $DIR/feature-gate-parameter_type_elision.rs:29:10
+   |
+LL | fn k(Wrap<u32>(x): Wrap<u32>) -> u32 {
+   |          ^^^^^
+   |
+   = help: add `#![feature(parameter_type_elision)]` to the crate attributes to enable
+   = note: this compiler was built on YYYY-MM-DD; consider upgrading it if it is out of date
+
+error: aborting due to 3 previous errors
+
+For more information about this error, try `rustc --explain E0658`.

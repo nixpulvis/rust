@@ -14,7 +14,8 @@ use tracing::debug;
 use super::diagnostics::dummy_arg;
 use super::ty::{AllowPlus, RecoverQPath, RecoverReturnSign};
 use super::{
-    ExpKeywordPair, FollowedByType, ForceCollect, Parser, Recovered, Trailing, UsePreAttrPos,
+    ExpKeywordPair, FollowedByType, ForceCollect, Parser, Recovered, Restrictions, Trailing,
+    UsePreAttrPos,
 };
 use crate::diagnostics::{self, FnPointerCannotBeAsync, FnPointerCannotBeConst};
 use crate::exp;
@@ -743,6 +744,13 @@ impl<'a> Parser<'a> {
                 return Ok((res?, Trailing::No, UsePreAttrPos::No));
             }
 
+            // Elided parameter types are only for functions, not for function pointer types or
+            // `Fn(..)` bounds.
+            let is_fn_item = matches!(
+                fn_parse_mode.context,
+                FnContext::Free | FnContext::Impl | FnContext::Trait
+            );
+
             let is_dot_dot_dot = if this.token.kind == token::DotDotDot {
                 IsDotDotDot::Yes
             } else {
@@ -765,27 +773,47 @@ impl<'a> Parser<'a> {
             };
             let (pat, ty) = if is_name_required || this.is_named_param() {
                 debug!("parse_param_general parse_pat (is_name_required:{})", is_name_required);
-                let (pat, colon) = this.parse_fn_param_pat_colon()?;
-                if !colon {
-                    let mut err = this.unexpected().unwrap_err();
-                    let pat_span = pat.span;
-                    return if let Some(ident) = this.parameter_without_type(
-                        &mut err,
-                        pat,
-                        is_name_required,
-                        first_param,
-                        fn_parse_mode,
-                    ) {
-                        let guar = err.emit_err();
-                        let mut arg = dummy_arg(ident, guar);
-                        arg.span = pat_span;
-                        Ok((arg, Trailing::No, UsePreAttrPos::No))
-                    } else {
-                        Err(err)
-                    };
+                // Generic arguments in the pattern's paths can go without a turbofish, as in a
+                // type, `Pair<T> { a, b }`.
+                let (pat, colon) = if is_fn_item {
+                    let res = this.restrictions | Restrictions::IN_PARAM_PAT;
+                    this.with_res(res, |this| this.parse_fn_param_pat_colon())?
+                } else {
+                    this.parse_fn_param_pat_colon()?
+                };
+                // A pattern that spells out its type can stand for the pattern and that type (see
+                // `Pat::spelled_ty`), so `Args { x, y }` is `Args { x, y }: Args`.
+                // FIXME(parameter_type_elision): `fn f(Self(b))` in an impl leaves out `Self`,
+                // but only a parameter named `self` is a receiver, so it isn't a method, as with
+                // `fn f(Self(b): Self)`. See https://github.com/rust-lang/rust/issues/107210.
+                if !colon
+                    && is_fn_item
+                    && matches!(this.token.kind, token::Comma | token::CloseParen)
+                    && let Some(ty) = pat.spelled_ty()
+                {
+                    this.psess.gated_spans.gate(sym::parameter_type_elision, pat.span);
+                    (pat, ty)
+                } else {
+                    if !colon {
+                        let mut err = this.unexpected().unwrap_err();
+                        let pat_span = pat.span;
+                        return if let Some(ident) = this.parameter_without_type(
+                            &mut err,
+                            pat,
+                            is_name_required,
+                            first_param,
+                            fn_parse_mode,
+                        ) {
+                            let guar = err.emit_err();
+                            let mut arg = dummy_arg(ident, guar);
+                            arg.span = pat_span;
+                            Ok((arg, Trailing::No, UsePreAttrPos::No))
+                        } else {
+                            Err(err)
+                        };
+                    }
+                    (pat, this.parse_ty_for_param()?)
                 }
-
-                (pat, this.parse_ty_for_param()?)
             } else {
                 debug!("parse_param_general ident_to_pat");
                 let parser_snapshot_before_ty = this.create_snapshot_for_diagnostic();
