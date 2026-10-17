@@ -15,8 +15,8 @@ use super::diagnostics::dummy_arg;
 use super::item::RECORD_ADT;
 use super::ty::{AllowPlus, RecoverQPath, RecoverReturnSign};
 use super::{
-    ExpKeywordPair, FollowedByType, ForceCollect, Parser, Recovered, SeqSep, Trailing,
-    UsePreAttrPos,
+    ExpKeywordPair, FollowedByType, ForceCollect, Parser, Recovered, Restrictions, SeqSep,
+    Trailing, UsePreAttrPos,
 };
 use crate::diagnostics::{self, FnPointerCannotBeAsync, FnPointerCannotBeConst};
 use crate::exp;
@@ -903,8 +903,8 @@ impl<'a> Parser<'a> {
                 return Ok((res?, Trailing::No, UsePreAttrPos::No));
             }
 
-            // Anonymous struct parameters are only for functions, not for function pointer types
-            // or `Fn(..)` bounds.
+            // Anonymous struct parameters and elided parameter types are only for functions,
+            // not for function pointer types or `Fn(..)` bounds.
             let is_fn_item = matches!(
                 fn_parse_mode.context,
                 FnContext::Free | FnContext::Impl | FnContext::Trait
@@ -936,10 +936,29 @@ impl<'a> Parser<'a> {
             };
             let (pat, ty) = if is_name_required || this.is_named_param() {
                 debug!("parse_param_general parse_pat (is_name_required:{})", is_name_required);
-                let (pat, colon) = this.parse_fn_param_pat_colon()?;
-                // `p: struct { .. }` is an ordinary `pat: ty`, which only binds `p`.
+                // Generic arguments in the pattern's paths can go without a turbofish, as in a
+                // type, `Pair<T> { a, b }`.
+                let (pat, colon) = if is_fn_item {
+                    let res = this.restrictions | Restrictions::IN_PARAM_PAT;
+                    this.with_res(res, |this| this.parse_fn_param_pat_colon())?
+                } else {
+                    this.parse_fn_param_pat_colon()?
+                };
+                // `p: struct { .. }` is an ordinary `pat: ty`, which only binds `p`. A pattern
+                // that spells out its type can stand for the pattern and that type (see
+                // `Pat::spelled_ty`), so `Args { x, y }` is `Args { x, y }: Args`.
+                // FIXME(parameter_type_elision): `fn f(Self(b))` in an impl leaves out `Self`,
+                // but only a parameter named `self` is a receiver, so it isn't a method, as with
+                // `fn f(Self(b): Self)`. See https://github.com/rust-lang/rust/issues/107210.
                 if colon && is_fn_item && this.is_record_ty_start() {
                     (pat, this.parse_record_ty(None)?)
+                } else if !colon
+                    && is_fn_item
+                    && matches!(this.token.kind, token::Comma | token::CloseParen)
+                    && let Some(ty) = pat.spelled_ty()
+                {
+                    this.psess.gated_spans.gate(sym::parameter_type_elision, pat.span);
+                    (pat, ty)
                 } else {
                     if !colon {
                         let mut err = this.unexpected().unwrap_err();

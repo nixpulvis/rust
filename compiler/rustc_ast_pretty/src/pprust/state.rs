@@ -2310,6 +2310,9 @@ impl<'a> State<'a> {
         match &input.ty.kind {
             ast::TyKind::Infer if is_closure => self.print_pat(&input.pat),
             ast::TyKind::Record(record) => self.print_record_param(input, record),
+            // A pattern that spells out the parameter's type
+            // (`#![feature(parameter_type_elision)]`).
+            _ if input.has_elided_ty() => self.print_pat(&input.pat),
             _ => {
                 if let Some(eself) = input.to_self() {
                     self.print_explicit_self(&eself);

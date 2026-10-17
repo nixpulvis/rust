@@ -259,6 +259,9 @@ declare_features! (
     (incomplete, named_arguments, "CURRENT_RUSTC_VERSION", None),
     /// Allow negative trait bounds. This is an internal-only feature for testing the trait solver!
     (internal, negative_bounds, "1.71.0", None),
+    /// Allows a parameter to leave out its type when its pattern spells it out,
+    /// `fn f(Point { x, y })` for `fn f(Point { x, y }: Point)`.
+    (incomplete, parameter_type_elision, "CURRENT_RUSTC_VERSION", None),
     /// Set the maximum pattern complexity allowed (not limited by default).
     (internal, pattern_complexity_limit, "1.78.0", None),
     /// Allows using `#[prelude_import]` on glob `use` items.

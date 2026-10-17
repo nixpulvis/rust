@@ -671,6 +671,81 @@ impl Pat {
         Some(Box::new(Ty { kind, id: self.id, span: self.span }))
     }
 
+    /// The type this pattern spells out, which a parameter with this pattern may leave out
+    /// (`#![feature(parameter_type_elision)]`): `fn f(Point { x, y })` is
+    /// `fn f(Point { x, y }: Point)`.
+    ///
+    /// Only a pattern that can bind something spells a type, so `()` and path patterns, like
+    /// `m::Unit`, don't: a parameter with nothing to bind writes `_: ()`.
+    ///
+    /// - A struct or tuple struct pattern, `P { .. }` or `T(..)`, spells the type its path names.
+    /// - A reference pattern, `&pat` or `&mut pat`, spells a reference, with an elided lifetime,
+    ///   to the type `pat` spells.
+    /// - A non-empty tuple pattern spells the tuple of the types its elements spell, if they all
+    ///   do.
+    /// - An array pattern spells an array of the type its first element that spells one spells,
+    ///   with as many elements as it has: `[P(a), b]` spells `[P; 2]`. One with a rest pattern,
+    ///   `..`, spells nothing: its length is unknown, and as a slice, `&[P(a), ..]`, it would be
+    ///   refutable, since it doesn't match `&[]`.
+    /// - `name @ pat` and `(pat)` spell the type `pat` spells.
+    ///
+    /// The type's span is inside the pattern's, which `Param::has_elided_ty` uses.
+    pub fn spelled_ty(&self) -> Option<Box<Ty>> {
+        let (kind, span) = match &self.kind {
+            PatKind::Struct(None, path, ..) | PatKind::TupleStruct(None, path, _) => {
+                (TyKind::Path(None, path.clone()), path.span)
+            }
+            // FIXME(parameter_type_elision): `&pin const pat` and `&pin mut pat`
+            // (`pin_ergonomics`) could spell `Pin<&T>` and `Pin<&mut T>`.
+            PatKind::Ref(pat, Pinnedness::Not, mutbl) => {
+                (TyKind::Ref(None, MutTy { ty: pat.spelled_ty()?, mutbl: *mutbl }), self.span)
+            }
+            PatKind::Tuple(pats) if !pats.is_empty() => {
+                let tys = pats.iter().map(|pat| pat.spelled_ty()).collect::<Option<_>>()?;
+                (TyKind::Tup(tys), self.span)
+            }
+            PatKind::Slice(pats) if !pats.iter().any(|pat| pat.is_slice_rest()) => {
+                let elem = pats.iter().find_map(|pat| pat.spelled_ty())?;
+                let len = token::Lit::new(token::LitKind::Integer, sym::integer(pats.len()), None);
+                let value = Box::new(Expr {
+                    id: DUMMY_NODE_ID,
+                    kind: ExprKind::Lit(len),
+                    span: self.span,
+                    attrs: AttrVec::new(),
+                    tokens: None,
+                });
+                (TyKind::Array(elem, AnonConst { id: DUMMY_NODE_ID, value }), self.span)
+            }
+            PatKind::Ident(_, _, Some(pat)) | PatKind::Paren(pat) => return pat.spelled_ty(),
+            _ => return None,
+        };
+        Some(Box::new(Ty { kind, id: DUMMY_NODE_ID, span }))
+    }
+
+    /// Whether this pattern spells out a type, see `spelled_ty`.
+    pub fn spells_ty(&self) -> bool {
+        match &self.kind {
+            PatKind::Struct(None, ..) | PatKind::TupleStruct(None, ..) => true,
+            PatKind::Ref(pat, Pinnedness::Not, _) => pat.spells_ty(),
+            PatKind::Tuple(pats) => !pats.is_empty() && pats.iter().all(|pat| pat.spells_ty()),
+            PatKind::Slice(pats) => {
+                !pats.iter().any(|pat| pat.is_slice_rest())
+                    && pats.iter().any(|pat| pat.spells_ty())
+            }
+            PatKind::Ident(_, _, Some(pat)) | PatKind::Paren(pat) => pat.spells_ty(),
+            _ => false,
+        }
+    }
+
+    /// Whether this is the rest of an array pattern, `..` or `name @ ..`.
+    fn is_slice_rest(&self) -> bool {
+        match &self.kind {
+            PatKind::Rest => true,
+            PatKind::Ident(_, _, Some(pat)) => pat.is_rest(),
+            _ => false,
+        }
+    }
+
     /// Walk top-down and call `it` in each place where a pattern occurs
     /// starting with the root pattern `walk` is called on. If `it` returns
     /// false then we will descend no further but siblings will be processed.
@@ -3011,6 +3086,13 @@ impl Param {
         } else {
             false
         }
+    }
+
+    /// Whether the parameter's type was left out, because its pattern spells it out (see
+    /// `Pat::spelled_ty`), as in `fn f(Point { x, y })`. Only such a type has a span inside the
+    /// pattern's.
+    pub fn has_elided_ty(&self) -> bool {
+        !self.pat.span.is_dummy() && self.pat.span.contains(self.ty.span) && self.pat.spells_ty()
     }
 
     /// Builds a `Param` object from `ExplicitSelf`.

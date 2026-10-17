@@ -845,7 +845,15 @@ impl<'a> Parser<'a> {
                 (Some(qself), path)
             } else {
                 // Parse an unqualified path
-                (None, self.parse_path(PathStyle::Pat)?)
+                let mut path = self.parse_path(PathStyle::Pat)?;
+                if let Some(segment) = path.segments.last_mut()
+                    && segment.args.is_none()
+                    && let Some(args) = self.parse_param_pat_generic_args()
+                {
+                    segment.args = Some(args);
+                    path.span = path.span.to(self.prev_token.span);
+                }
+                (None, path)
             };
             let span = lo.to(self.prev_token.span);
 
@@ -1523,6 +1531,40 @@ impl<'a> Parser<'a> {
             | token::Bang)) // A macro expanding to a pattern.
     }
 
+    /// Parses the generic arguments of a path in a function parameter's pattern written as in a
+    /// type, without a turbofish, like the `<T>` of `Pair<T> { a, b }`, which spells the
+    /// parameter's type (`#![feature(parameter_type_elision)]`). Parses nothing unless the
+    /// arguments are followed by the fields of a struct or tuple struct pattern, so that a type
+    /// written without a parameter name, `fn f(Vec<u8>)`, is still reported as one.
+    fn parse_param_pat_generic_args(&mut self) -> Option<Box<ast::GenericArgs>> {
+        if !self.restrictions.contains(Restrictions::IN_PARAM_PAT) || self.token != token::Lt {
+            return None;
+        }
+        let snapshot = self.create_snapshot_for_diagnostic();
+        let lo = self.token.span;
+        let parse = |this: &mut Self| -> PResult<'a, Box<ast::GenericArgs>> {
+            this.eat_lt();
+            let args = this.parse_angle_args(None)?;
+            this.expect_gt()?;
+            Ok(ast::AngleBracketedArgs { args, span: lo.to(this.prev_token.span) }.into())
+        };
+        match parse(self) {
+            Ok(args) if matches!(self.token.kind, token::OpenBrace | token::OpenParen) => {
+                self.psess.gated_spans.gate(sym::parameter_type_elision, args.span());
+                Some(args)
+            }
+            Ok(_) => {
+                self.restore_snapshot(snapshot);
+                None
+            }
+            Err(err) => {
+                err.cancel();
+                self.restore_snapshot(snapshot);
+                None
+            }
+        }
+    }
+
     /// Parses `ident` or `ident @ pat`.
     /// Used by the copy foo and ref foo patterns to give a good
     /// error message when parsing mistakes like `ref foo(a, b)`.
@@ -1532,6 +1574,20 @@ impl<'a> Parser<'a> {
         syntax_loc: Option<PatternLocation>,
     ) -> PResult<'a, PatKind> {
         let ident = self.parse_ident_common(false)?;
+
+        // `Pair<T> { a, b }` in a function parameter (see `parse_param_pat_generic_args`).
+        if binding_annotation == BindingMode::NONE
+            && let Some(args) = self.parse_param_pat_generic_args()
+        {
+            let mut path = Path::from_ident(ident);
+            path.segments[0].args = Some(args);
+            path.span = ident.span.to(self.prev_token.span);
+            return if self.check(exp!(OpenBrace)) {
+                self.parse_pat_struct(None, path)
+            } else {
+                self.parse_pat_tuple_struct(None, path)
+            };
+        }
 
         if self.may_recover()
             && !matches!(syntax_loc, Some(PatternLocation::FunctionParameter))

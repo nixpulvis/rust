@@ -287,10 +287,12 @@ impl Rewrite for Pat {
             }
             PatKind::Tuple(ref items) => rewrite_tuple_pat(items, None, self.span, context, shape),
             PatKind::Path(ref q_self, ref path) => {
-                rewrite_path(context, PathContext::Expr, q_self, path, shape)
+                let path_context = pat_path_context(context, path);
+                rewrite_path(context, path_context, q_self, path, shape)
             }
             PatKind::TupleStruct(ref q_self, ref path, ref pat_vec) => {
-                let path_str = rewrite_path(context, PathContext::Expr, q_self, path, shape)?;
+                let path_context = pat_path_context(context, path);
+                let path_str = rewrite_path(context, path_context, q_self, path, shape)?;
                 rewrite_tuple_pat(pat_vec, Some(path_str), self.span, context, shape)
             }
             PatKind::Expr(ref expr) => expr.rewrite_result(context, shape),
@@ -341,6 +343,24 @@ impl Rewrite for Pat {
     }
 }
 
+/// The context to rewrite a pattern's path in. A path whose generic arguments are written as in a
+/// type, without a turbofish, as in `fn f(Pair<T> { a, b })`
+/// (`#![feature(parameter_type_elision)]`), stays that way.
+fn pat_path_context(context: &RewriteContext<'_>, path: &ast::Path) -> PathContext {
+    let without_turbofish = path.segments.iter().any(|segment| {
+        segment.args.as_ref().is_some_and(|args| {
+            !context
+                .snippet(mk_sp(segment.ident.span.hi(), args.span().lo()))
+                .contains("::")
+        })
+    });
+    if without_turbofish {
+        PathContext::Type
+    } else {
+        PathContext::Expr
+    }
+}
+
 fn rewrite_struct_pat(
     qself: &Option<Box<ast::QSelf>>,
     path: &ast::Path,
@@ -355,7 +375,8 @@ fn rewrite_struct_pat(
     let path_str = if is_inferred_struct_path(qself, path) {
         "_".to_owned()
     } else {
-        rewrite_path(context, PathContext::Expr, qself, path, path_shape)?
+        let path_context = pat_path_context(context, path);
+        rewrite_path(context, path_context, qself, path, path_shape)?
     };
 
     if fields.is_empty() && !ellipsis {

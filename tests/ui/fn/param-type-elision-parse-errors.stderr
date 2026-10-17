@@ -1,0 +1,42 @@
+error: expected one of `:` or `|`, found `)`
+  --> $DIR/param-type-elision-parse-errors.rs:9:20
+   |
+LL | fn rest([Px(a), ..]) {}
+   |                    ^ expected one of `:` or `|`
+
+error: expected one of `:` or `|`, found `)`
+  --> $DIR/param-type-elision-parse-errors.rs:11:25
+   |
+LL | fn rest_ref(&[Px(a), ..]) {}
+   |                         ^ expected one of `:` or `|`
+
+error: expected one of `:` or `|`, found `)`
+  --> $DIR/param-type-elision-parse-errors.rs:15:18
+   |
+LL | fn empty_array([]) {}
+   |                  ^ expected one of `:` or `|`
+
+error: expected one of `:` or `|`, found `)`
+  --> $DIR/param-type-elision-parse-errors.rs:22:11
+   |
+LL | fn unit(()) {}
+   |           ^ expected one of `:` or `|`
+   |
+help: explicitly ignore the parameter name
+   |
+LL | fn unit(_: ()) {}
+   |         ++
+
+error: expected one of `!`, `(`, `...`, `..=`, `..`, `::`, `:`, `{`, or `|`, found `)`
+  --> $DIR/param-type-elision-parse-errors.rs:24:23
+   |
+LL | fn unit_struct(m::Unit) {}
+   |                       ^ expected one of 9 possible tokens
+   |
+help: explicitly ignore the parameter name
+   |
+LL | fn unit_struct(_: m::Unit) {}
+   |                ++
+
+error: aborting due to 5 previous errors
+

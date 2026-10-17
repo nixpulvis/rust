@@ -1582,6 +1582,7 @@ symbols! {
         panic_unwind,
         panicking,
         param_attrs,
+        parameter_type_elision,
         parent_label,
         partial_cmp,
         partial_ord,

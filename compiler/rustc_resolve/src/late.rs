@@ -755,6 +755,11 @@ pub(crate) struct DiagMetadata<'ast> {
     /// The current enclosing (non-closure) function (used for better errors).
     current_function: Option<(FnKind<'ast>, Span)>,
 
+    /// The pattern of the parameter whose type is being resolved, when the type was left out
+    /// because the pattern spells it out (`#![feature(parameter_type_elision)]`), as in
+    /// `fn f(P { x })`.
+    elided_param_pat: Option<&'ast Pat>,
+
     /// A list of labels as of yet unused. Labels will be removed from this map when
     /// they are used (in a `break` or `continue` statement)
     unused_labels: FxIndexMap<NodeId, Span>,
@@ -2565,7 +2570,12 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
             // Record elision candidates only for this parameter.
             debug_assert_matches!(self.lifetime_elision_candidates, None);
             self.lifetime_elision_candidates = Some(Default::default());
+            // A left-out type is the one its pattern spells out (`Pat::spelled_ty`), which is the
+            // only kind of type with a span inside the pattern's.
+            let elided = pat.filter(|pat| pat.span.contains(ty.span) && pat.spells_ty());
+            let prev = replace(&mut self.diag_metadata.elided_param_pat, elided);
             self.visit_ty(ty);
+            self.diag_metadata.elided_param_pat = prev;
             let local_candidates = self.lifetime_elision_candidates.take();
 
             if let Some(candidates) = local_candidates {

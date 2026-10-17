@@ -778,6 +778,10 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
             return (err, Vec::new());
         };
 
+        if self.suggest_type_for_variant_pattern(&mut err, path, span, res) {
+            return (err, Vec::new());
+        }
+
         let (found, suggested_candidates, mut candidates) = self.try_lookup_name_relaxed(
             &mut err,
             source,
@@ -886,6 +890,101 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
             err.help(format!(
                 "you might have meant to add a named formatting argument: `{argument}`"
             ));
+        }
+        true
+    }
+
+    /// A parameter can leave out its type when its pattern spells it out
+    /// (`#![feature(parameter_type_elision)]`), but a variant pattern, `fn f(E::V(x))`, spells
+    /// out its variant, which isn't a type. The pattern is only irrefutable when the enum has no
+    /// other variant, so only then suggests writing the enum as the type, `E::V(x): E`. Otherwise
+    /// the parameter has to take the enum and match on it in the body.
+    fn suggest_type_for_variant_pattern(
+        &self,
+        err: &mut Diag<'_>,
+        path: &[Segment],
+        span: Span,
+        res: Option<Res>,
+    ) -> bool {
+        let Some(pat) = self.diag_metadata.elided_param_pat else { return false };
+        let Some(Res::Def(DefKind::Variant | DefKind::Ctor(CtorOf::Variant, _), def_id)) = res
+        else {
+            return false;
+        };
+        if !pat.span.contains(span) {
+            return false;
+        }
+        let tcx = self.r.tcx;
+        let variant = match tcx.def_kind(def_id) {
+            DefKind::Ctor(..) => tcx.parent(def_id),
+            _ => def_id,
+        };
+        let enum_def_id = tcx.parent(variant);
+        // The enum as written in the pattern, or else its name.
+        let enum_path = match path {
+            [enum_path @ .., _] if !enum_path.is_empty() => Segment::names_to_string(enum_path),
+            _ => tcx.item_name(enum_def_id).to_string(),
+        };
+        err.span_label(span, "a variant, not a type");
+        err.note(
+            "a parameter's type can only be left out when its pattern names a type, and a \
+             variant pattern names a variant",
+        );
+        let variant_count = self.find_module(enum_def_id).map(|(enum_module, _)| {
+            let mut count = 0;
+            enum_module.for_each_child(self.r, |_, _, _, _, binding| {
+                if let Res::Def(DefKind::Variant, _) = binding.res() {
+                    count += 1;
+                }
+            });
+            count
+        });
+        match variant_count {
+            Some(1) => {}
+            Some(_) => {
+                err.help(format!(
+                    "a parameter's pattern has to match every `{enum_path}`, and this one doesn't \
+                     match its other variants, so take a `{enum_path}` and match on it in the body"
+                ));
+                return true;
+            }
+            None => return true,
+        }
+        // The type the pattern spells out, with the enum in place of the variant.
+        fn spelled(pat: &ast::Pat, variant: Span, enum_path: &str) -> Option<String> {
+            use ast::{PatKind, Pinnedness};
+            Some(match &pat.kind {
+                PatKind::Struct(None, path, ..) | PatKind::TupleStruct(None, path, _) => {
+                    if path.span.contains(variant) {
+                        enum_path.to_owned()
+                    } else {
+                        path_to_string(path)
+                    }
+                }
+                PatKind::Ref(pat, Pinnedness::Not, mutbl) => {
+                    format!("{}{}", mutbl.ref_prefix_str(), spelled(pat, variant, enum_path)?)
+                }
+                PatKind::Tuple(pats) => {
+                    let tys = pats
+                        .iter()
+                        .map(|pat| spelled(pat, variant, enum_path))
+                        .collect::<Option<Vec<_>>>()?;
+                    let comma = if tys.len() == 1 { "," } else { "" };
+                    format!("({}{comma})", tys.join(", "))
+                }
+                PatKind::Ident(_, _, Some(pat)) | PatKind::Paren(pat) => {
+                    return spelled(pat, variant, enum_path);
+                }
+                _ => return None,
+            })
+        }
+        if let Some(ty) = spelled(pat, span, &enum_path) {
+            err.span_suggestion_verbose(
+                pat.span.shrink_to_hi(),
+                "write the parameter's type",
+                format!(": {ty}"),
+                Applicability::MaybeIncorrect,
+            );
         }
         true
     }
